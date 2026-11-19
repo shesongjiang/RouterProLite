@@ -1,0 +1,33 @@
+# 构建中间产物（发布的 02-bin/ProLite.exe 除外）
+01-source/router-prolite/build/
+01-source/router-prolite/dist/
+*.exe
+!02-bin/ProLite.exe
+
+# 日志与本地缓存
+*.log
+logs/
+.cache/
+*.cache
+*.tmp
+*.part
+*.bak
+
+# 编辑器 / IDE
+.trae/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 依赖目录
+node_modules/
+
+# 本机授权与凭证（即使误放也不入库）
+device-write-allow.json
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
