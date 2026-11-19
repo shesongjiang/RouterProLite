@@ -13,13 +13,16 @@ import (
 )
 
 func (r *Router) sftpClient() (*sftp.Client, uint64, error) {
+	client, err := r.ensureClient()
+	if err != nil {
+		r.mu.Lock()
+		gen := r.gen
+		r.mu.Unlock()
+		return nil, gen, err
+	}
 	r.mu.Lock()
-	client := r.client
 	gen := r.gen
 	r.mu.Unlock()
-	if client == nil {
-		return nil, gen, errNotConnected
-	}
 	c, err := sftp.NewClient(client)
 	if err != nil {
 		return nil, gen, err

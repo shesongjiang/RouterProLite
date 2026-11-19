@@ -31,6 +31,31 @@ func (e *fingerprintError) Error() string {
 	return fmt.Sprintf("主机密钥不匹配：已保存 %s，当前设备 %s。如果设备刚重装系统，请重置主机指纹后重试。", e.Saved, e.Current)
 }
 
+// authExpiredError 表示会话里保存的口令已无法通过认证，需要用户重新输入。
+type authExpiredError struct {
+	cause error
+}
+
+func (e *authExpiredError) Error() string {
+	return "登录凭据已失效，需要重新输入密码后重连"
+}
+
+func (e *authExpiredError) Unwrap() error { return e.cause }
+
+func isAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var authErr *ssh.ServerAuthError
+	if errors.As(err, &authErr) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "unable to authenticate") ||
+		strings.Contains(s, "no supported methods remain") ||
+		strings.Contains(s, "handshake failed")
+}
+
 func normalizeConnection(in ConnectionInput) (ConnectionInput, error) {
 	in.Host = strings.TrimSpace(in.Host)
 	in.User = strings.TrimSpace(in.User)
@@ -157,6 +182,9 @@ func dialSSH(in ConnectionInput, pinned string) (*ssh.Client, string, error) {
 	addr := net.JoinHostPort(in.Host, strconv.Itoa(in.Port))
 	client, err := ssh.Dial("tcp", addr, cfg)
 	if err != nil {
+		if in.Auth == "password" && isAuthFailure(err) {
+			return nil, "", &authExpiredError{cause: err}
+		}
 		return nil, "", err
 	}
 	if captured == "" {

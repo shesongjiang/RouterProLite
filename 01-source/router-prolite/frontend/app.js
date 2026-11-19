@@ -196,6 +196,10 @@
 
   function toastError(e) {
     const msg = errText(e);
+    if (msg.indexOf('需要重新输入密码') >= 0 || msg.indexOf('凭据已失效') >= 0) {
+      leaveToConnect(msg);
+      return;
+    }
     const now = Date.now();
     if (state.toastTimes[msg] && now - state.toastTimes[msg] < 4000) return;
     state.toastTimes[msg] = now;

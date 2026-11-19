@@ -181,8 +181,8 @@ func (a *App) StartInstallJob(req InstallRequest) (string, error) {
 			return "", err
 		}
 	}
-	if a.router.currentClient() == nil {
-		return "", errNotConnected
+	if err := a.router.sessionAvailable(); err != nil {
+		return "", err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)

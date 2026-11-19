@@ -22,9 +22,9 @@ func shq(s string) string {
 }
 
 func (r *Router) runRaw(cmd string, timeout time.Duration) (string, int, error) {
-	client := r.currentClient()
-	if client == nil {
-		return "", -1, errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return "", -1, err
 	}
 	return execWithClient(client, cmd, timeout)
 }

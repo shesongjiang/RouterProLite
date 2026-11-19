@@ -62,9 +62,9 @@ func (w *lineWriter) String() string {
 
 // execJob 是可取消、可超时的长任务通道；不改变 ExecCommand 的现有行为。
 func (r *Router) execJob(ctx context.Context, cmd string, timeout time.Duration, onLine func(string)) (JobOutput, error) {
-	client := r.currentClient()
-	if client == nil {
-		return JobOutput{ExitCode: -1}, errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return JobOutput{ExitCode: -1}, err
 	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -135,9 +135,9 @@ func (c *countReader) Read(p []byte) (int, error) {
 func (r *Router) execStreamStdin(ctx context.Context, cmd string, src io.Reader, total int64,
 	onProgress func(int64)) (string, error) {
 
-	client := r.currentClient()
-	if client == nil {
-		return "", errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return "", err
 	}
 	sess, err := client.NewSession()
 	if err != nil {

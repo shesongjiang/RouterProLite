@@ -53,9 +53,9 @@ echo '@@END'; true`
 
 // ReadPkgEnv 只读采集包管理器、架构、内核、源与已装列表。
 func (r *Router) ReadPkgEnv() (*PkgEnv, error) {
-	client := r.currentClient()
-	if client == nil {
-		return nil, errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return nil, err
 	}
 	out, _, err := execWithClient(client, pkgEnvScript, 20*time.Second)
 	if err != nil && strings.TrimSpace(out) == "" {
@@ -122,18 +122,22 @@ func (r *Router) ReadPkgEnv() (*PkgEnv, error) {
 }
 
 func (r *Router) readInstalled(env *PkgEnv) error {
+	client, err := r.ensureClient()
+	if err != nil {
+		return err
+	}
 	var cmd string
 	if env.Manager == "apk" {
 		cmd = "apk info -v 2>/dev/null"
 	} else {
 		cmd = "opkg list-installed 2>/dev/null"
 	}
-	out, _, err := execWithClient(r.currentClient(), cmd, 20*time.Second)
+	out, _, err := execWithClient(client, cmd, 20*time.Second)
 	if err != nil && strings.TrimSpace(out) == "" {
 		return err
 	}
 	if env.Manager == "apk" && strings.TrimSpace(out) == "" {
-		alt, _, aerr := execWithClient(r.currentClient(), "apk list --installed 2>/dev/null", 20*time.Second)
+		alt, _, aerr := execWithClient(client, "apk list --installed 2>/dev/null", 20*time.Second)
 		if aerr == nil || strings.TrimSpace(alt) != "" {
 			out = alt
 		}

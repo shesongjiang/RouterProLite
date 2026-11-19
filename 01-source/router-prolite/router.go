@@ -16,9 +16,10 @@ type Router struct {
 	mu          sync.Mutex
 
 	client        *ssh.Client
-	input         *ConnectionInput
-	info          *ConnectionInfo
+	input         *ConnectionInput // 会话级凭据：仅内存，不写盘
 	pinned        string
+	credExpired   bool // 保存的口令已失效，等待用户重新输入
+	info          *ConnectionInfo
 	gen           uint64
 	meta          *Meta
 	metaAt        time.Time
@@ -37,12 +38,22 @@ type Router struct {
 	latencyMs   float64
 	latencyOK   bool
 	stopLatency chan struct{}
+
+	// dial 仅用于测试注入；正常运行时走 dialSSH。
+	dial func(ConnectionInput, string) (*ssh.Client, string, error)
 }
 
 func newRouter() *Router {
 	return &Router{
 		prevNet: map[string]netCounter{},
 	}
+}
+
+func (r *Router) dialNow(in ConnectionInput, pinned string) (*ssh.Client, string, error) {
+	if r.dial != nil {
+		return r.dial(in, pinned)
+	}
+	return dialSSH(in, pinned)
 }
 
 func (r *Router) Connect(in ConnectionInput, pinned string) (*ConnectionInfo, error) {
@@ -53,7 +64,7 @@ func (r *Router) Connect(in ConnectionInput, pinned string) (*ConnectionInfo, er
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
 
-	client, fp, err := dialSSH(normalized, pinned)
+	client, fp, err := r.dialNow(normalized, pinned)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +80,7 @@ func (r *Router) Connect(in ConnectionInput, pinned string) (*ConnectionInfo, er
 	r.client = client
 	r.input = &normalized
 	r.pinned = fp
+	r.credExpired = false
 	r.info = nil
 	r.meta = nil
 	r.metaAt = time.Time{}
@@ -137,6 +149,7 @@ func (r *Router) Disconnect() {
 	r.client = nil
 	r.gen++
 	r.input = nil
+	r.credExpired = false
 	r.info = nil
 	r.meta = nil
 	r.metaAt = time.Time{}
@@ -183,9 +196,9 @@ func (r *Router) currentMeta() *Meta {
 }
 
 func (r *Router) exec(cmd string, timeout time.Duration) (string, error) {
-	client := r.currentClient()
-	if client == nil {
-		return "", errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return "", err
 	}
 	out, _, err := execWithClient(client, cmd, timeout)
 	return out, err
@@ -354,6 +367,90 @@ func (r *Router) markBroken(err error) {
 	}
 }
 
+// sessionAvailable 判断当前是否还有可用的会话（连接或内存凭据）。
+func (r *Router) sessionAvailable() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.credExpired {
+		return &authExpiredError{}
+	}
+	if r.client == nil && r.input == nil {
+		return errNotConnected
+	}
+	return nil
+}
+
+// ensureClient 返回可用连接；如果连接已断开，会用内存里的会话凭据自动重建。
+// 插件安装、存储、控制台、日志等所有 SSH 后台操作都走这里。
+func (r *Router) ensureClient() (*ssh.Client, error) {
+	if c := r.currentClient(); c != nil {
+		return c, nil
+	}
+	r.mu.Lock()
+	expired := r.credExpired
+	r.mu.Unlock()
+	if expired {
+		return nil, &authExpiredError{}
+	}
+
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+
+	if c := r.currentClient(); c != nil {
+		return c, nil
+	}
+
+	r.mu.Lock()
+	in := r.input
+	pinned := r.pinned
+	r.mu.Unlock()
+	if in == nil {
+		return nil, errNotConnected
+	}
+
+	client, fp, err := r.dialNow(*in, pinned)
+	if err != nil {
+		var ae *authExpiredError
+		if errors.As(err, &ae) {
+			r.mu.Lock()
+			r.input = nil
+			r.credExpired = true
+			r.lastErr = ae.Error()
+			r.mu.Unlock()
+			return nil, ae
+		}
+		r.mu.Lock()
+		r.lastErr = err.Error()
+		r.mu.Unlock()
+		return nil, err
+	}
+
+	r.mu.Lock()
+	if r.input == nil {
+		r.mu.Unlock()
+		_ = client.Close()
+		return nil, errNotConnected
+	}
+	oldClient := r.client
+	r.gen++
+	r.client = client
+	r.pinned = fp
+	r.lastErr = ""
+	r.snap = nil
+	r.snapAt = time.Time{}
+	r.console = nil
+	r.consoleAt = time.Time{}
+	r.prevCPU = cpuStat{}
+	r.prevCPUTime = time.Time{}
+	r.prevNet = map[string]netCounter{}
+	r.prevNetTime = time.Time{}
+	r.mu.Unlock()
+	if oldClient != nil && oldClient != client {
+		_ = oldClient.Close()
+	}
+	return client, nil
+}
+
 func (r *Router) tryReconnect() bool {
 	r.lifecycleMu.Lock()
 	defer r.lifecycleMu.Unlock()
@@ -369,8 +466,17 @@ func (r *Router) tryReconnect() bool {
 	input := *in
 	r.mu.Unlock()
 
-	client, fp, err := dialSSH(input, pinned)
+	client, fp, err := r.dialNow(input, pinned)
 	if err != nil {
+		var ae *authExpiredError
+		if errors.As(err, &ae) {
+			r.mu.Lock()
+			r.input = nil
+			r.credExpired = true
+			r.lastErr = ae.Error()
+			r.mu.Unlock()
+			return false
+		}
 		r.mu.Lock()
 		r.lastErr = "重连失败：" + err.Error()
 		r.mu.Unlock()
@@ -383,6 +489,7 @@ func (r *Router) tryReconnect() bool {
 	gen := r.gen
 	r.client = client
 	r.pinned = fp
+	r.credExpired = false
 	r.snap = nil
 	r.snapAt = time.Time{}
 	r.console = nil
@@ -496,9 +603,9 @@ func (r *Router) Invalidate() {
 }
 
 func (r *Router) RunCommand(cmd string, timeout time.Duration) (ProbeResult, error) {
-	client := r.currentClient()
-	if client == nil {
-		return ProbeResult{}, errNotConnected
+	client, err := r.ensureClient()
+	if err != nil {
+		return ProbeResult{}, err
 	}
 	start := time.Now()
 	out, code, err := execWithClient(client, cmd, timeout)
