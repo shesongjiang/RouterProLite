@@ -317,7 +317,7 @@
 
     function tiles() {
       const out = [];
-      out.push({ key: 'cellular', title: '蜂窝网络', status: '无模组', subtitle: '未检测到模组', tone: 'muted', active: false, toggleable: false, on: false, action: 'section:network' });
+      out.push({ key: 'cellular', title: '蜂窝网络', status: '无模组', subtitle: '未检测到模组', tone: 'muted', active: false, toggleable: false, on: false, action: 'cell:detail' });
       if (sqmOn !== null) out.push({ key: 'sqm', title: 'SQM QoS', status: sqmOn ? 'CAKE' : 'OFF', subtitle: '抗缓冲膨胀 · 低抖动', tone: 'green', active: sqmOn, toggleable: true, on: sqmOn, action: 'toggle:sqm' });
       out.push({ key: 'adguard', title: 'AdGuard DNS', status: adOn ? 'ON' : 'OFF', subtitle: 'DNS 过滤 · 去广告', tone: 'blue', active: adOn, toggleable: true, on: adOn, action: 'toggle:AdGuardHome' });
       out.push({ key: 'proxy', title: 'Smart Proxy', status: proxyOn ? 'ON' : 'OFF', subtitle: '透明代理 · 分流规则', tone: 'blue', active: proxyOn, toggleable: true, on: proxyOn, action: 'toggle:passwall' });
@@ -367,7 +367,7 @@
           memPct: 29 + wave * 2, memUsed: 154 * 1048576, memTotal: 512 * 1048576,
           load1: 0.42 + wave * 0.2, load5: 0.36, load15: 0.31, processCount: 118,
           tempC: 43 + wave * 3, tempAvailable: true,
-          flashFree: 98 * 1048576, flashTotal: 128 * 1048576,
+          flashFree: 2048, flashTotal: 128 * 1048576,
         },
         wan: {
           up: wanUp, status: wanUp ? 'UP' : 'DOWN', proto: 'pppoe', device: 'wan',
@@ -445,15 +445,23 @@
           { device: 'tmpfs', mount: '/tmp', fs: 'tmpfs', options: 'rw,nosuid,nodev' },
         ],
         interfaces: [
+          { name: '蜂窝网络', up: true, pending: false, available: true, proto: '4G', device: 'usb0', ips: ['192.168.4.170/24'], gateway: '192.168.4.1', dns, uptime: 7200, rxBytes: 1024 * 1048576 * 12, txBytes: 1024 * 1048576 * 3, linkSpeed: '', cellModem: true },
           { name: 'lan', up: true, pending: false, available: true, proto: 'static', device: 'br-lan', ips: ['192.168.100.1/24'], gateway: '', dns: [], uptime: 42 * 86400, rxBytes: 1024 * 1048576 * 84, txBytes: 1024 * 1048576 * 31, linkSpeed: '1000M FULL' },
           { name: 'wan', up: ifUpWan, pending: false, available: true, proto: 'pppoe', device: 'wan', ips: ifUpWan ? ['203.0.113.42/32'] : [], gateway: ifUpWan ? '203.0.113.1' : '', dns, uptime: ifUpWan ? 42 * 86400 : 0, rxBytes: 1024 * 1048576 * 132, txBytes: 1024 * 1048576 * 44, linkSpeed: '1000M FULL' },
           { name: 'wan6', up: false, pending: false, available: true, proto: 'dhcpv6', device: 'wan', ips: [], gateway: '', dns: [], uptime: 0, rxBytes: 0, txBytes: 0, linkSpeed: '' },
           { name: 'loopback', up: true, pending: false, available: true, proto: 'static', device: 'lo', ips: ['127.0.0.1/8'], gateway: '', dns: [], uptime: 42 * 86400, rxBytes: 0, txBytes: 0, linkSpeed: '' },
         ],
+        modem: {
+          present: true, installed: true, connected: true, count: 1,
+          mode: '4G', operator: 'CHINA MOBILE', model: 'RM500U-CNV', simStatus: 'READY',
+          band: 'B3', rsrp: -78, sinr: 12, interface: 'usb0', ipv4: '192.168.4.170/24',
+          gateway: '192.168.4.1', uptime: 7200,
+          raw: '{"cellular":{"present":true,"device":"usb0","model":"RM500U-CNV","sim_status":"READY","connection":"connected","radio":"LTE","band":"B3","lte_signal":-78,"signal_valid":true}}',
+        },
         wireless: {
-          present: true,
-          radios: [{ section: 'radio0', name: 'phy0', band: '5GHz', channel: '149', width: 'HE80', txPower: '20', country: 'CN', path: 'pci', disabled: !wifiOn, active: wifiOn }],
-          ifaces: [{ section: 'default_radio0', radio: 'radio0', mode: 'ap', ssid: 'ProLite-5G', network: 'lan', encryption: 'sae-mixed', key: '', channel: '149', hidden: false, disabled: !wifiOn, active: wifiOn, clients: 3, signal: '', bitrate: '' }],
+          present: false,
+          radios: [],
+          ifaces: [],
         },
         plugins: pluginList(),
         packages: (function () {
@@ -488,7 +496,6 @@
           ruleCount: 9, redirectCount: pfs.length, fullCone: fullcone,
           upnpInstalled: true, upnpRunning: upnpOn, upnpEnabled: upnpOn, upnpSection: 'upnpd', upnpConfigName: 'upnpd',
         },
-        modem: { present: false, internet: false, count: 0, raw: '', devices: [] },
         mwan: { installed: false, running: false, interfaces: [] },
         configs: ['dhcp', 'dropbear', 'firewall', 'fstab', 'luci', 'mwan3', 'network', 'openssh', 'rpcd', 'sqm', 'system', 'uhttpd', 'wireless'],
         fetchedAt: Date.now(),
@@ -1053,6 +1060,9 @@
   function renderDeviceCard(snap) {
     const sys = snap.system || {};
     const info = snap.info || state.info || {};
+    const flashTotal = Number(sys.flashTotal) || 0;
+    const flashFree = Number(sys.flashFree) || 0;
+    const flashLow = flashTotal > 0 && flashFree < 1024 * 1024;
     const cells = [
       ['型号', info.model || sys.model],
       ['芯片', sys.chipset],
@@ -1061,11 +1071,15 @@
       ['CPU', sys.cpuCores ? sys.cpuCores + ' 核' : ''],
       ['运行', sys.uptime ? shortDur(sys.uptime) : ''],
       ['温度', sys.tempAvailable ? Math.round(sys.tempC) + '°C' : ''],
-      ['根分区', sys.flashFree ? fmtBytes(sys.flashFree) + ' 空闲' : ''],
+      ['根分区', flashTotal ? fmtBytes(flashFree) + ' 空闲 · ' + fmtBytes(flashTotal) : '', flashLow],
     ].filter((x) => x[1]);
     $('#devSummary').innerHTML = '<div class="dev-grid">' + cells.map((x) =>
-      '<div class="dev-cell"><span class="dev-label">' + esc(x[0]) + '</span><span class="dev-value mono">' + esc(x[1]) + '</span></div>'
-    ).join('') + '</div>';
+      '<div class="dev-cell' + (x[2] ? ' dev-warn' : '') + '"><span class="dev-label">' + esc(x[0]) + '</span><span class="dev-value mono">' + esc(x[1]) + '</span></div>'
+    ).join('') + '</div>' +
+      (flashLow
+        ? '<div class="space-warn">根分区只剩 ' + esc(fmtBytes(flashFree)) + ' / ' + esc(fmtBytes(flashTotal)) +
+          '，已接近写满。安装插件、保存配置或写入日志可能失败，请立即清理或扩容 overlay。</div>'
+        : '');
     const plugins = snap.plugins || [];
     $('#pluginChips').innerHTML = plugins.length
       ? plugins.map((p) => '<span class="plugin-chip' + (p.running ? ' on' : '') + '" title="' + (p.running ? '运行中' : (p.enabled ? '已启用未运行' : '未启用')) + '">' +
@@ -1377,6 +1391,10 @@
       card.classList.add('flash');
       return;
     }
+    if (action === 'cell:detail') {
+      openCellView();
+      return;
+    }
     if (action.indexOf('section:') === 0) {
       const which = action.slice(8);
       if (which === 'portforward') { state.accOpen.add('pf'); openLab('lab-pf', 'tools'); }
@@ -1453,6 +1471,103 @@
       renderLab();
       if (state.cTab === 'config' && !state.cfgVals) ensureConfigData();
     }
+  }
+
+  function openCellView() {
+    if (!state.api || !state.connected) return;
+    $('#mainView').classList.add('hidden');
+    $('#cellView').classList.remove('hidden');
+    $('#cellView').setAttribute('aria-hidden', 'false');
+    renderCellView();
+    loadCellData(false);
+  }
+
+  function closeCellView() {
+    $('#cellView').classList.add('hidden');
+    $('#cellView').setAttribute('aria-hidden', 'true');
+    if (state.connected) $('#mainView').classList.remove('hidden');
+  }
+
+  async function loadCellData(force) {
+    if (!state.api || !state.connected) return;
+    state.cellLoading = true;
+    renderCellView();
+    try {
+      state.console = await state.api.GetConsole(!!force);
+      state.cellError = '';
+    } catch (e) {
+      state.cellError = errText(e);
+      if (state.cellError.indexOf('需要重新输入密码') >= 0) toastError(e);
+    } finally {
+      state.cellLoading = false;
+      renderCellView();
+    }
+  }
+
+  function cellStat(label, value, tone) {
+    return '<div class="cell-stat' + (tone ? ' ' + tone : '') + '"><span>' + esc(label) + '</span><b>' +
+      esc(value == null || value === '' ? '—' : value) + '</b></div>';
+  }
+
+  function renderCellView() {
+    const host = $('#cellBody');
+    if (!host) return;
+    const c = state.console;
+    const m = (c && c.modem) || {};
+    const present = !!m.present;
+    const connected = !!m.connected;
+    const badge = $('#cellBadge');
+    if (badge) {
+      badge.textContent = !c ? '读取中' : (present ? (connected ? '已连接' : '未连接') : '未检测到模组');
+    }
+    if (state.cellLoading && !c) {
+      host.innerHTML = '<div class="cell-empty">正在读取模组状态…</div>';
+      return;
+    }
+    if (state.cellError) {
+      host.innerHTML = '<div class="cell-empty">' + esc(state.cellError) + '</div>';
+      return;
+    }
+    if (!c) {
+      host.innerHTML = '<div class="cell-empty">暂无数据</div>';
+      return;
+    }
+    if (!present && !m.installed) {
+      host.innerHTML = '<div class="cell-empty">设备没有检测到蜂窝模组。</div>';
+      return;
+    }
+
+    const noSim = /ABSENT|NOT INSERTED|NO SIM/i.test(m.simStatus || '');
+    const statusText = !present ? '未检测到模组' : (noSim ? '未插 SIM 卡' : (connected ? '已连接' : '未连接'));
+    const mode = m.mode || (present ? '蜂窝' : '—');
+    const sub = [m.model, m.interface].filter(Boolean).join(' · ');
+    const rsrp = m.rsrp ? m.rsrp + ' dBm' : '—';
+    const sinr = m.sinr ? m.sinr + ' dB' : '—';
+    const rsrpTone = m.rsrp && m.rsrp <= -110 ? 'bad' : (m.rsrp && m.rsrp <= -95 ? 'warn' : '');
+    const simText = m.simStatus ? (noSim ? '未插卡' : m.simStatus) : '—';
+    const uptime = m.uptime ? shortDur(m.uptime) : '—';
+    const raw = m.raw || '';
+
+    host.innerHTML =
+      '<div class="cell-hero">' +
+        '<div class="cell-mode">' + esc(mode) + '</div>' +
+        '<span class="status-pill ' + (connected ? 'on' : '') + '">' + esc(statusText) + '</span>' +
+        '<div class="cell-operator">' + esc(m.operator || (present ? '已注册网络' : '未检测到模组')) + '</div>' +
+        (sub ? '<div class="cell-sub mono">' + esc(sub) + '</div>' : '') +
+      '</div>' +
+      '<div class="cell-grid">' +
+        cellStat('制式', mode) +
+        cellStat('运营商', m.operator || '—') +
+        cellStat('SIM 状态', simText, noSim ? 'bad' : '') +
+        cellStat('信号 RSRP', rsrp, rsrpTone) +
+        cellStat('信号 SINR', sinr) +
+        cellStat('频段', m.band || '—') +
+        cellStat('接口', m.interface || '—') +
+        cellStat('IP 地址', m.ipv4 || '—') +
+        cellStat('在线时长', uptime) +
+        cellStat('连接状态', statusText, connected ? '' : (present ? 'warn' : '')) +
+      '</div>' +
+      (raw ? '<details class="cell-raw"><summary>原始输出</summary><pre>' + esc(raw) + '</pre></details>' : '');
   }
 
   async function ensureConfigData() {
@@ -2324,6 +2439,9 @@
     const memPct = mem.total ? memUsed / mem.total * 100 : 0;
     const sys = (state.snap && state.snap.system) || {};
     const root = (c.storage || []).find((s) => s.mount === '/') || {};
+    const flashTotal = Number(sys.flashTotal) || 0;
+    const flashFree = Number(sys.flashFree) || 0;
+    const flashLow = flashTotal > 0 && flashFree < 1048576;
     const plugins = c.plugins || [];
     const running = plugins.filter((p) => p.running).length;
     const stat = (label, value, cls) => '<div class="stat"><span class="stat-label">' + label + '</span><span class="stat-value mono ' + (cls || '') + '">' + esc(value || '—') + '</span></div>';
@@ -2341,10 +2459,11 @@
         stat('负载', sys.load1 != null ? Number(sys.load1).toFixed(2) : '—') +
         stat('温度', sys.tempAvailable ? Math.round(sys.tempC) + '°C' : '—') +
         stat('内存', mem.total ? Math.round(memUsed / 1048576) + '/' + Math.round(mem.total / 1048576) + ' MB' : '—') +
-        stat('根分区', root.available ? root.available + ' 可用' : (sys.flashFree ? fmtBytes(sys.flashFree) : '—')) +
+        stat('根分区', flashTotal ? fmtBytes(flashFree) + ' 空闲' : (root.available ? root.available + ' KB 可用' : '—'), flashLow ? 'crit' : '') +
         stat('软件包', c.packageCount + ' 个') +
         stat('插件', running + '/' + plugins.length + ' 运行') +
       '</div>' +
+      (flashLow ? '<div class="space-warn">根分区只剩 ' + esc(fmtBytes(flashFree)) + ' / ' + esc(fmtBytes(flashTotal)) + '，继续写入可能失败。</div>' : '') +
       '<div class="subblock-title" style="margin-top:9px">内存占用</div>' + pctBar(memPct, memPct >= 85 ? 'crit' : memPct >= 70 ? 'warn' : '') +
       '<div class="note" style="margin-top:5px">' + esc(c.date || '') + ' · ' + esc(c.release && (c.release.description || c.release.distribution) || '') + '</div>' +
       '</div>' +
@@ -2389,7 +2508,15 @@
     const rows = (c.interfaces || []).map((it) => {
       const up = it.up;
       const ips = (it.ips || []).join(', ') || '无地址';
-      return '<div class="lab-section if-card">' +
+      const actions = it.cellModem
+        ? '<div class="row if-actions"><button type="button" class="btn mini primary" data-act="cell-detail">蜂窝详情</button></div>'
+        : '<div class="row if-actions">' +
+            '<button type="button" class="btn mini" data-act="iface-up" data-iface="' + esc(it.name) + '">拉起</button>' +
+            '<button type="button" class="btn mini ghost" data-act="iface-renew" data-iface="' + esc(it.name) + '">续约</button>' +
+            '<button type="button" class="btn mini danger" data-act="iface-down" data-iface="' + esc(it.name) + '" data-label="断开">断开</button>' +
+          '</div>';
+      return '<div class="lab-section if-card' + (it.cellModem ? ' cell-if-card' : '') + '"' +
+          (it.cellModem ? ' data-cell-card="1"' : '') + '>' +
         '<div class="if-head"><span class="mono if-name">' + esc(it.name) + '</span>' +
           '<span class="status-pill ' + (up ? 'on' : '') + '">' + (up ? 'UP' : (it.available ? 'DOWN' : 'N/A')) + '</span>' +
           '<span class="grow"></span><span class="mono">' + esc((it.proto || '').toUpperCase()) + '</span></div>' +
@@ -2399,11 +2526,7 @@
         '<div class="if-meta mono"><span>RX ' + fmtBytes(it.rxBytes) + '</span><span>TX ' + fmtBytes(it.txBytes) + '</span>' +
           (it.linkSpeed ? '<span>' + esc(it.linkSpeed) + '</span>' : '') +
           (it.uptime ? '<span>' + shortDur(it.uptime) + '</span>' : '') + '</div>' +
-        '<div class="row if-actions">' +
-          '<button type="button" class="btn mini" data-act="iface-up" data-iface="' + esc(it.name) + '">拉起</button>' +
-          '<button type="button" class="btn mini ghost" data-act="iface-renew" data-iface="' + esc(it.name) + '">续约</button>' +
-          '<button type="button" class="btn mini danger" data-act="iface-down" data-iface="' + esc(it.name) + '" data-label="断开">断开</button>' +
-        '</div></div>';
+        actions + '</div>';
     }).join('');
     return '<div class="lab-section"><div class="subblock-title">网络接口</div>' +
       '<div class="note">来自 ubus network.interface dump；断开 LAN 会立即中断管理连接。</div></div>' +
@@ -3042,6 +3165,12 @@
       return;
     }
 
+    if (act === 'cell-detail') {
+      closeLab();
+      openCellView();
+      return;
+    }
+
     if (act === 'iface-up' || act === 'iface-renew' || act === 'iface-down') {
       const name = btn.dataset.iface;
       const action = act.slice(6);
@@ -3353,6 +3482,10 @@
     state.connected = false;
     stopPolling();
     closeLab();
+    $('#cellView').classList.add('hidden');
+    $('#cellView').setAttribute('aria-hidden', 'true');
+    state.cellLoading = false;
+    state.cellError = '';
     state.snap = null;
     state.lab = null;
     state.console = null;
@@ -3442,9 +3575,12 @@
     $('#topoWrap').addEventListener('click', (e) => {
       const port = e.target.closest('[data-port]');
       if (!port) return;
+      if (port.dataset.port === 'cell') { openCellView(); return; }
       state.cTab = port.dataset.port === 'wifi' ? 'wireless' : 'network';
       openLab(null, 'console');
     });
+    $('#cellBack').addEventListener('click', closeCellView);
+    $('#cellRefresh').addEventListener('click', () => loadCellData(true));
     $('#labDisconnectBtn').addEventListener('click', () => {
       if (!state.api) return;
       state.api.Disconnect().catch(() => {});
@@ -3653,6 +3789,9 @@
       if (MOCK) {
         const info = await state.api.Connect({ host: cfg.host, port: cfg.port, user: cfg.user, auth: 'agent', remember: true });
         enterMain(info);
+        if (new URLSearchParams(location.search).get('cell') === '1') setTimeout(openCellView, 700);
+        const ctab = new URLSearchParams(location.search).get('console');
+        if (ctab) setTimeout(() => { state.cTab = ctab; openLab(null, 'console'); }, 700);
       } else if (cfg.saved && cfg.auth !== 'password') {
         doConnect();
       }

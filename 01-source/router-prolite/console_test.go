@@ -118,3 +118,61 @@ func TestParseSystemSettings(t *testing.T) {
 		t.Fatalf("unexpected ntp settings: %q enabled=%v servers=%v", ntpSection, ntpEnabled, servers)
 	}
 }
+
+func TestParseAddrIPv4(t *testing.T) {
+	raw := "7: usb0    inet 192.168.4.170/24 brd 192.168.4.255 scope global usb0\\       valid_lft forever\n" +
+		"8: br-lan    inet 192.168.100.1/24 brd 192.168.100.255 scope global br-lan\\       valid_lft forever\n"
+	got := parseAddrIPv4(raw)
+	if len(got["usb0"]) != 1 || got["usb0"][0] != "192.168.4.170/24" {
+		t.Fatalf("usb0 addr: %v", got["usb0"])
+	}
+	if len(got["br-lan"]) != 1 || got["br-lan"][0] != "192.168.100.1/24" {
+		t.Fatalf("br-lan addr: %v", got["br-lan"])
+	}
+}
+
+func TestAttachModemInterfaceUsesMatchedLink(t *testing.T) {
+	c := &ConsoleData{
+		Interfaces: []InterfaceInfo{{
+			Name: "wan", Device: "usb0", Up: true, Available: true, Proto: "dhcp",
+			IPs: []string{"192.168.4.170/24"}, Gateway: "192.168.4.1",
+			DNS: []string{"192.168.4.1"}, Uptime: 3600,
+		}},
+		Modem: CellularInfo{Installed: true, Present: true, Connected: true, Mode: "4G", Interface: "usb0"},
+	}
+	attachModemInterface(c, "7: usb0 inet 192.168.4.170/24", map[string]netCounter{"usb0": {rx: 123, tx: 456}})
+	if len(c.Interfaces) != 2 || !c.Interfaces[0].CellModem {
+		t.Fatalf("expected modem card first: %+v", c.Interfaces)
+	}
+	m := c.Interfaces[0]
+	if m.Device != "usb0" || m.Proto != "4G" || !m.Up || len(m.IPs) != 1 || m.IPs[0] != "192.168.4.170/24" {
+		t.Fatalf("unexpected modem card: %+v", m)
+	}
+	if m.RxBytes != 123 || m.TxBytes != 456 || m.Uptime != 3600 {
+		t.Fatalf("modem counters/uptime: %+v", m)
+	}
+	if c.Modem.IPv4 != "192.168.4.170/24" || c.Modem.Gateway != "192.168.4.1" || c.Modem.Uptime != 3600 {
+		t.Fatalf("modem link details: %+v", c.Modem)
+	}
+}
+
+func TestAttachModemInterfaceAddrFallback(t *testing.T) {
+	c := &ConsoleData{
+		Modem: CellularInfo{Installed: true, Present: true, Mode: "5G", Interface: "wwan0"},
+	}
+	attachModemInterface(c, "9: wwan0 inet 10.20.30.40/30", nil)
+	if len(c.Interfaces) != 1 || c.Interfaces[0].Name != "蜂窝网络" || c.Interfaces[0].Device != "wwan0" {
+		t.Fatalf("expected synthetic modem card: %+v", c.Interfaces)
+	}
+	if c.Modem.IPv4 != "10.20.30.40/30" || c.Interfaces[0].IPs[0] != "10.20.30.40/30" {
+		t.Fatalf("addr fallback failed: %+v", c.Modem)
+	}
+}
+
+func TestAttachModemInterfaceSkipsWithoutStack(t *testing.T) {
+	c := &ConsoleData{Interfaces: []InterfaceInfo{{Name: "lan", Device: "br-lan"}}}
+	attachModemInterface(c, "", nil)
+	if len(c.Interfaces) != 1 {
+		t.Fatalf("must not add modem card without a modem stack: %+v", c.Interfaces)
+	}
+}

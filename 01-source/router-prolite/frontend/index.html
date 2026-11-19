@@ -275,6 +275,25 @@
     </main>
   </section>
 
+  <!-- ============ Cellular detail ============ -->
+  <section id="cellView" class="view cell-view hidden" aria-hidden="true">
+    <header class="topbar cell-top" style="--wails-draggable:drag">
+      <button type="button" class="icon-btn" id="cellBack" title="返回" style="--wails-draggable:no-drag">
+        <svg class="i"><use href="#i-back"/></svg>
+      </button>
+      <div class="top-left">
+        <span class="host-name">蜂窝网络</span>
+        <span class="link-badge mono" id="cellBadge">--</span>
+      </div>
+      <div class="top-actions" style="--wails-draggable:no-drag">
+        <button type="button" class="btn mini ghost" id="cellRefresh">刷新</button>
+      </div>
+    </header>
+    <main class="main-scroll cell-scroll" id="cellScroll">
+      <div id="cellBody"></div>
+    </main>
+  </section>
+
   <!-- ============ Lab ============ -->
   <section id="labView" class="view lab-view" aria-hidden="true">
     <header class="topbar lab-top" style="--wails-draggable:drag">

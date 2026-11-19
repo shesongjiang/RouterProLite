@@ -231,6 +231,10 @@ type CellularInfo struct {
 	RSRQ      int      `json:"rsrq,omitempty"`
 	SINR      int      `json:"sinr,omitempty"`
 	RSSI      int      `json:"rssi,omitempty"`
+	IPv4      string   `json:"ipv4,omitempty"`
+	Gateway   string   `json:"gateway,omitempty"`
+	DNS       []string `json:"dns,omitempty"`
+	Uptime    int64    `json:"uptime,omitempty"`
 	Raw       string   `json:"raw"`
 	Devices   []string `json:"devices"`
 }
@@ -317,6 +321,7 @@ type InterfaceInfo struct {
 	RxBytes   uint64   `json:"rxBytes"`
 	TxBytes   uint64   `json:"txBytes"`
 	LinkSpeed string   `json:"linkSpeed"`
+	CellModem bool     `json:"cellModem,omitempty"`
 }
 
 type WiFiRadio struct {

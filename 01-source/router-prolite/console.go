@@ -21,6 +21,7 @@ echo '@@UPTIME'; cut -d' ' -f1 /proc/uptime 2>/dev/null
 echo '@@DF'; df -h 2>/dev/null
 echo '@@MOUNTS'; cat /proc/mounts 2>/dev/null
 echo '@@IFACES'; ubus call network.interface dump 2>/dev/null
+echo '@@ADDR'; ip -4 -o addr show 2>/dev/null
 echo '@@DEV'; cat /proc/net/dev 2>/dev/null
 echo '@@SPEEDS'; for d in /sys/class/net/*; do n=${d##*/}; s=$(cat "$d/speed" 2>/dev/null); [ -n "$s" ] && echo "$n $s"; done
 echo '@@IWINFO'; iwinfo 2>/dev/null; for d in $(iwinfo 2>/dev/null | awk 'NR>1{print $1}'); do echo "##DEV $d"; iwinfo "$d" info 2>/dev/null; echo "##ASSOC $d"; iwinfo "$d" assoclist 2>/dev/null | wc -l; done
@@ -362,6 +363,76 @@ type iwInfo struct {
 	Signal  string
 	Bitrate string
 	Clients int
+}
+
+var addrLineRe = regexp.MustCompile(`^\d+:\s+(\S+)\s+inet\s+([0-9.]+/\d+)`)
+
+func parseAddrIPv4(raw string) map[string][]string {
+	out := map[string][]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		m := addrLineRe.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		out[m[1]] = append(out[m[1]], m[2])
+	}
+	return out
+}
+
+// attachModemInterface 把蜂窝模组作为独立接口加入控制台接口列表，
+// 并回填模组的 IP、网关、DNS、在线时长。
+func attachModemInterface(c *ConsoleData, addrRaw string, counters map[string]netCounter) {
+	if c == nil || (!c.Modem.Installed && !c.Modem.Present) {
+		return
+	}
+	dev := c.Modem.Interface
+	var matched InterfaceInfo
+	found := false
+	if dev != "" {
+		for _, it := range c.Interfaces {
+			if it.Device == dev {
+				matched = it
+				found = true
+				break
+			}
+		}
+	}
+	if found {
+		if len(matched.IPs) > 0 {
+			c.Modem.IPv4 = matched.IPs[0]
+		}
+		c.Modem.Gateway = matched.Gateway
+		c.Modem.DNS = matched.DNS
+		c.Modem.Uptime = matched.Uptime
+	}
+	if c.Modem.IPv4 == "" && dev != "" {
+		if ips := parseAddrIPv4(addrRaw)[dev]; len(ips) > 0 {
+			c.Modem.IPv4 = ips[0]
+		}
+	}
+
+	entry := InterfaceInfo{
+		Name:      "蜂窝网络",
+		Up:        c.Modem.Connected,
+		Available: c.Modem.Present,
+		Proto:     c.Modem.Mode,
+		Device:    dev,
+		Gateway:   c.Modem.Gateway,
+		DNS:       c.Modem.DNS,
+		Uptime:    c.Modem.Uptime,
+		CellModem: true,
+	}
+	if entry.Proto == "" {
+		entry.Proto = "cellular"
+	}
+	if c.Modem.IPv4 != "" {
+		entry.IPs = []string{c.Modem.IPv4}
+	}
+	if cnt, ok := counters[dev]; ok {
+		entry.RxBytes = cnt.rx
+		entry.TxBytes = cnt.tx
+	}
+	c.Interfaces = append([]InterfaceInfo{entry}, c.Interfaces...)
 }
 
 func parseIwinfo(raw string) map[string]*iwInfo {
@@ -765,6 +836,7 @@ func parseConsole(out string, meta *Meta) *ConsoleData {
 	tmp := &Meta{}
 	tmp.parseModem(s)
 	c.Modem = tmp.Modem
+	attachModemInterface(c, s["ADDR"], counters)
 	mcopy := *meta
 	mcopy.parseMwan(s["MWAN"])
 	c.Mwan = mcopy.Mwan

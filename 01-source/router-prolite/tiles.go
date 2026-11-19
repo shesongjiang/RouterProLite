@@ -23,7 +23,7 @@ func buildTiles(s *Snapshot, m *Meta) []Tile {
 		optional = append(optional, Tile{Key: "wifi", Title: "Wi-Fi", Status: status, Subtitle: sub, Tone: "blue", Active: m.Wireless.Enabled, Action: "section:network"})
 	}
 	if m.Caps.Cellular {
-		tile := Tile{Key: "cellular", Title: "蜂窝网络", Action: "section:network"}
+		tile := Tile{Key: "cellular", Title: "蜂窝网络", Action: "cell:detail"}
 		if !m.Modem.Present {
 			tile.Status = "无模组"
 			tile.Subtitle = "未检测到模组"

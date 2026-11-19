@@ -67,6 +67,9 @@ func TestCellularTileWithoutModem(t *testing.T) {
 	if cell.Status != "无模组" || cell.Subtitle != "未检测到模组" || cell.Detail != "" {
 		t.Fatalf("no-modem tile must not show fake values: %+v", cell)
 	}
+	if cell.Action != "cell:detail" {
+		t.Fatalf("cellular tile should open the shared detail view: %q", cell.Action)
+	}
 	if _, ok := byKey["wifi"]; ok {
 		t.Fatalf("wifi tile must not occupy a slot without wireless hardware")
 	}

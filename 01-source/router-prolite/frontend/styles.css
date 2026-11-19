@@ -1703,4 +1703,64 @@ input::placeholder { color: var(--text-tertiary); opacity: .75; }
 }
 .usb-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 7px; }
 
+/* ============ cellular detail ============ */
+.cell-view { background: var(--bg); }
+.cell-scroll { gap: 9px; }
+.cell-hero {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+}
+.cell-mode { font-size: 26px; font-weight: 700; letter-spacing: .02em; line-height: 1.1; }
+.cell-operator { color: var(--text-secondary); font-size: 11px; }
+.cell-hero .status-pill { justify-self: end; }
+.cell-sub { color: var(--text-tertiary); font-size: 9.5px; grid-column: 1 / -1; }
+.cell-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.cell-stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  min-width: 0;
+}
+.cell-stat span { display: block; color: var(--text-tertiary); font-size: 9px; margin-bottom: 3px; }
+.cell-stat b { display: block; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-stat.warn b { color: var(--accent-amber); }
+.cell-stat.bad b { color: var(--accent-red); }
+.cell-raw {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+}
+.cell-raw summary { cursor: pointer; color: var(--text-secondary); font-size: 11px; }
+.cell-raw pre {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.cell-empty { padding: 18px 12px; text-align: center; color: var(--text-tertiary); font-size: 11px; }
+.dev-cell.dev-warn { border-color: color-mix(in srgb, var(--accent-red) 45%, var(--border)); }
+.dev-cell.dev-warn .dev-value { color: var(--accent-red); }
+.space-warn {
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-red) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-red) 9%, transparent);
+  color: var(--accent-red);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 
