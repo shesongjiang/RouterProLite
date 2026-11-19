@@ -347,42 +347,57 @@ func buildPorts(meta *Meta, wan, wan6 *WANInfo, rates *Rates, clients []Client, 
 		Clients: online,
 	})
 
-	wifi := meta.Wireless
-	wifiUp := wifi.Present && wifi.Enabled
-	wifiState := "无硬件"
-	wifiDetail := "未检测到无线硬件"
-	if wifi.Present {
-		radios := len(wifi.Radios)
-		if radios == 0 {
-			radios = 1
+	if meta.Caps.Wireless {
+		wifi := meta.Wireless
+		wifiUp := wifi.Present && wifi.Enabled
+		wifiState := "无硬件"
+		wifiDetail := "未检测到无线硬件"
+		if wifi.Present {
+			radios := len(wifi.Radios)
+			if radios == 0 {
+				radios = 1
+			}
+			wifiDetail = strconv.Itoa(radios) + " 射频"
+			if wifi.Channel != "" {
+				wifiDetail = "CH " + wifi.Channel + " · " + wifiDetail
+			}
+			if wifi.Enabled {
+				wifiState = "UP"
+			} else {
+				wifiState = "OFF"
+			}
 		}
-		wifiDetail = strconv.Itoa(radios) + " 射频"
-		if wifi.Channel != "" {
-			wifiDetail = "CH " + wifi.Channel + " · " + wifiDetail
-		}
-		if wifi.Enabled {
-			wifiState = "UP"
-		} else {
-			wifiState = "OFF"
-		}
+		ports = append(ports, PortStatus{
+			Key:    "wifi",
+			Label:  "WiFi",
+			Up:     wifiUp,
+			State:  wifiState,
+			Detail: wifiDetail,
+		})
 	}
-	ports = append(ports, PortStatus{
-		Key:    "wifi",
-		Label:  "WiFi",
-		Up:     wifiUp,
-		State:  wifiState,
-		Detail: wifiDetail,
-	})
 
-	if meta.Caps.Cellular && meta.Modem.Present {
+	if meta.Caps.Cellular {
 		cellUp := meta.Modem.Present && meta.Modem.Internet
-		cellState := "DOWN"
-		if cellUp {
-			cellState = "UP"
-		}
-		detail := "蜂窝网络"
-		if meta.Modem.Count > 0 {
-			detail = strconv.Itoa(meta.Modem.Count) + " 个模块"
+		cellState := "未连接"
+		detail := "未检测到模组"
+		if meta.Modem.Present {
+			cellState = "DOWN"
+			if cellUp {
+				cellState = "UP"
+			}
+			if meta.Modem.Mode != "" {
+				detail = meta.Modem.Mode
+			} else {
+				detail = "蜂窝网络"
+			}
+			if meta.Modem.Operator != "" {
+				detail = meta.Modem.Operator
+			}
+			if meta.Modem.Interface != "" {
+				detail += " · " + meta.Modem.Interface
+			}
+		} else {
+			cellState = "无模组"
 		}
 		ports = append(ports, PortStatus{
 			Key:    "cell",

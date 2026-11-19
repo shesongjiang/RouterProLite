@@ -331,6 +331,7 @@
         { key: 'wan', label: 'WAN', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'pppoe · wan', speed: wanUp ? '1000M FULL' : '' },
         { key: 'wan6', label: 'WAN6', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'IPv6 · wan6' },
         { key: 'lan', label: 'LAN', up: true, state: 'UP', detail: 'br-lan · ' + online + ' 台在线', speed: '1000M FULL', clients: online },
+        { key: 'cell', label: '4G/5G', up: false, state: '无模组', detail: '未检测到模组' },
       ];
     }
 
@@ -1296,7 +1297,7 @@
       const v = String(s == null ? '' : s);
       return v.length > n ? v.slice(0, n - 1) + '…' : v;
     };
-    const toneOf = (p) => p.up ? 'up' : (p.state === '无硬件' || p.state === '未配置') ? 'none' : 'off';
+    const toneOf = (p) => p.up ? 'up' : (p.state === '无硬件' || p.state === '未配置' || p.state === '无模组') ? 'none' : 'off';
 
     const parts = [];
     ports.forEach((p, i) => {

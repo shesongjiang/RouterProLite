@@ -223,6 +223,9 @@ type CellularInfo struct {
 	Count     int      `json:"count"`
 	Mode      string   `json:"mode,omitempty"`
 	Operator  string   `json:"operator,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	SIMStatus string   `json:"simStatus,omitempty"`
+	Band      string   `json:"band,omitempty"`
 	Interface string   `json:"interface,omitempty"`
 	RSRP      int      `json:"rsrp,omitempty"`
 	RSRQ      int      `json:"rsrq,omitempty"`

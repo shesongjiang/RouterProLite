@@ -32,8 +32,12 @@ echo '@@UPNP2'; ubus call uci get '{"config":"miniupnpd"}' 2>/dev/null
 echo '@@LEASES'; cat /tmp/dhcp.leases 2>/dev/null
 echo '@@PS'; ps w 2>/dev/null | head -n 90
 echo '@@MODEM'; ubus call qmodem info 2>/dev/null
+echo '@@MODEMCTRL'; ubus call modem_ctrl info 2>/dev/null
 echo '@@QMODEM_NETIF'; ubus call qmodem get_network_interfaces 2>/dev/null
-echo '@@QMODEM_SECS'; for s in $(uci show qmodem 2>/dev/null | sed -n 's/^qmodem\.\([^.=]*\)=modem$/\1/p'); do echo "##SEC $s"; ubus call qmodem base_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem cell_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem network_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem dial_status "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem get_connect_status "{\"config_section\":\"$s\"}" 2>/dev/null; done
+echo '@@QMODEM_SECS'; for s in $(uci show qmodem 2>/dev/null | sed -n -e 's/^qmodem\.\([^.=]*\)=modem$/\1/p' -e 's/^qmodem\.\([^.=]*\)=modem-device$/\1/p'); do echo "##SEC $s"; ubus call qmodem base_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem cell_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem network_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem dial_status "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem get_connect_status "{\"config_section\":\"$s\"}" 2>/dev/null; done
+echo '@@QMODEM_UCI'; uci -q show qmodem 2>/dev/null
+echo '@@MODEMDEVS'; ls /sys/class/net 2>/dev/null | grep -E '^(wwan|rmnet)' 2>/dev/null; ls /dev/cdc-wdm* 2>/dev/null
+echo '@@UBUSMODEM'; ubus list 2>/dev/null | grep -E '^(qmodem|modem_ctrl|cpe_network)$'
 echo '@@CPE'; ubus call cpe_network status 2>/dev/null
 echo '@@MWAN'; mwan3 status 2>/dev/null
 echo '@@END'; true`
@@ -759,7 +763,7 @@ func parseConsole(out string, meta *Meta) *ConsoleData {
 	c.Processes = parseProcessList(s["PS"])
 
 	tmp := &Meta{}
-	tmp.parseModem(s["MODEM"], s["CPE"], s["QMODEM_SECS"], s["QMODEM_NETIF"])
+	tmp.parseModem(s)
 	c.Modem = tmp.Modem
 	mcopy := *meta
 	mcopy.parseMwan(s["MWAN"])

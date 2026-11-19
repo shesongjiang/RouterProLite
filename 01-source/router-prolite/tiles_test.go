@@ -101,7 +101,12 @@ func TestParseModemSections(t *testing.T) {
 {"cell_info":[{"type":"LTE","rsrp":"-85","sinr":"12","rsrq":"-10"}]}
 {"operator":"CHINA MOBILE","interface":"wwan0","connected":true}
 `
-	m.parseModem(`{"error":"explicit valid modem section required"}`, `{"interfaces":{},"cellular":{}}`, secs, `{"interfaces":[{"id":"wan"}]}`)
+	m.parseModem(map[string]string{
+		"MODEM":        `{"error":"explicit valid modem section required"}`,
+		"CPE":          `{"interfaces":{},"cellular":{}}`,
+		"QMODEM_SECS":  secs,
+		"QMODEM_NETIF": `{"interfaces":[{"id":"wan"}]}`,
+	})
 	if !m.Modem.Present || !m.Modem.Installed || m.Modem.Count != 1 {
 		t.Fatalf("modem presence: %+v", m.Modem)
 	}
@@ -118,8 +123,11 @@ func TestParseModemSections(t *testing.T) {
 
 func TestParseModemNoModule(t *testing.T) {
 	m := &Meta{Init: map[string]bool{"qmodem": true}}
-	m.parseModem(`{"error":"explicit valid modem section required"}`,
-		`{"interfaces":{"wan":{"internet":true}},"cellular":{}}`, "", `{"interfaces":[{"id":"wan"}]}`)
+	m.parseModem(map[string]string{
+		"MODEM":        `{"error":"explicit valid modem section required"}`,
+		"CPE":          `{"interfaces":{"wan":{"internet":true}},"cellular":{}}`,
+		"QMODEM_NETIF": `{"interfaces":[{"id":"wan"}]}`,
+	})
 	if m.Modem.Present {
 		t.Fatalf("should not report a modem: %+v", m.Modem)
 	}
@@ -128,5 +136,51 @@ func TestParseModemNoModule(t *testing.T) {
 	}
 	if m.Modem.RSRP != 0 || m.Modem.SINR != 0 || m.Modem.Operator != "" {
 		t.Fatalf("must not invent signal values: %+v", m.Modem)
+	}
+}
+
+// 这台 CPE 实际使用 cpe_network + modem_ctrl，qmodem 配置段类型是 modem-device。
+func TestParseModemCPENetwork(t *testing.T) {
+	m := &Meta{Init: map[string]bool{}}
+	m.parseModem(map[string]string{
+		"UBUSMODEM": "modem_ctrl\ncpe_network",
+		"QMODEM_UCI": "qmodem.modem1=modem-device\n" +
+			"qmodem.modem1.network='wwan0'\n",
+		"MODEMCTRL": `{"info":[{"modem_info":[{"key":"operator","value":"CHINA MOBILE"},{"key":"network_type","value":"LTE"},{"key":"model","value":"SG500M2-X"}]}]}`,
+		"CPE":       `{"interfaces":{"wwan0":{"device":"wwan0","internet":true}},"cellular":{"present":true,"device":"wwan0","model":"SG500M2-X","sim_status":"READY","connection":"connected","radio":"LTE","band":"B3","lte_signal":-78,"nr_signal":null,"signal_valid":true}}`,
+	})
+	if !m.Modem.Present || !m.Modem.Installed || !m.Caps.Cellular {
+		t.Fatalf("cpe_network modem should be detected: %+v", m.Modem)
+	}
+	if m.Modem.Mode != "4G" || m.Modem.Operator != "CHINA MOBILE" || m.Modem.Interface != "wwan0" || m.Modem.Model != "SG500M2-X" {
+		t.Fatalf("modem identity: %+v", m.Modem)
+	}
+	if m.Modem.RSRP != -78 || !m.Modem.Connected {
+		t.Fatalf("modem signal: %+v", m.Modem)
+	}
+}
+
+func TestParseModemCtrlNoModule(t *testing.T) {
+	m := &Meta{Init: map[string]bool{}}
+	m.parseModem(map[string]string{
+		"UBUSMODEM": "modem_ctrl\ncpe_network",
+		"MODEMCTRL": `{"info":[]}`,
+		"CPE":       `{"interfaces":{},"cellular":{}}`,
+	})
+	if m.Modem.Present {
+		t.Fatalf("should not report a modem: %+v", m.Modem)
+	}
+	if !m.Modem.Installed || !m.Caps.Cellular {
+		t.Fatalf("modem stack should still expose the cellular tile: %+v", m.Modem)
+	}
+	if m.Modem.RSRP != 0 || m.Modem.Mode != "" || m.Modem.Operator != "" {
+		t.Fatalf("must not invent values without a module: %+v", m.Modem)
+	}
+}
+
+func TestParseQmodemSectionsModemDevice(t *testing.T) {
+	secs, nets := parseQmodemSections("qmodem.modem1=modem-device\nqmodem.modem1.network='wwan0'\n")
+	if len(secs) != 1 || secs[0] != "modem1" || nets["modem1"] != "wwan0" {
+		t.Fatalf("modem-device section parse: %v %v", secs, nets)
 	}
 }

@@ -74,8 +74,12 @@ echo '@@TC'; command -v tc 2>/dev/null
 echo '@@RESOLV'; cat /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null
 echo '@@MWAN'; mwan3 status 2>/dev/null
 echo '@@MODEM'; ubus call qmodem info 2>/dev/null
+echo '@@MODEMCTRL'; ubus call modem_ctrl info 2>/dev/null
 echo '@@QMODEM_NETIF'; ubus call qmodem get_network_interfaces 2>/dev/null
-echo '@@QMODEM_SECS'; for s in $(uci show qmodem 2>/dev/null | sed -n 's/^qmodem\.\([^.=]*\)=modem$/\1/p'); do echo "##SEC $s"; ubus call qmodem base_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem cell_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem network_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem dial_status "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem get_connect_status "{\"config_section\":\"$s\"}" 2>/dev/null; done
+echo '@@QMODEM_SECS'; for s in $(uci show qmodem 2>/dev/null | sed -n -e 's/^qmodem\.\([^.=]*\)=modem$/\1/p' -e 's/^qmodem\.\([^.=]*\)=modem-device$/\1/p'); do echo "##SEC $s"; ubus call qmodem base_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem cell_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem network_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem dial_status "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem get_connect_status "{\"config_section\":\"$s\"}" 2>/dev/null; done
+echo '@@QMODEM_UCI'; uci -q show qmodem 2>/dev/null
+echo '@@MODEMDEVS'; ls /sys/class/net 2>/dev/null | grep -E '^(wwan|rmnet)' 2>/dev/null; ls /dev/cdc-wdm* 2>/dev/null
+echo '@@UBUSMODEM'; ubus list 2>/dev/null | grep -E '^(qmodem|modem_ctrl|cpe_network)$'
 echo '@@CPE'; ubus call cpe_network status 2>/dev/null
 echo '@@END'; true`
 
@@ -300,7 +304,7 @@ func parseMetaOutput(out string) *Meta {
 	m.parseWireless()
 	m.parseDDNS()
 	m.parseWAN()
-	m.parseModem(s["MODEM"], s["CPE"], s["QMODEM_SECS"], s["QMODEM_NETIF"])
+	m.parseModem(s)
 	m.parseMwan(s["MWAN"])
 
 	return m
@@ -475,19 +479,38 @@ func (m *Meta) parseWAN() {
 	}
 }
 
-func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
-	cell := CellularInfo{Installed: m.Init["qmodem"]}
+func (m *Meta) parseModem(s map[string]string) {
+	raw := s["MODEM"]
+	ctrlRaw := s["MODEMCTRL"]
+	secsRaw := s["QMODEM_SECS"]
+	netifRaw := s["QMODEM_NETIF"]
+	uciRaw := s["QMODEM_UCI"]
+	devsRaw := s["MODEMDEVS"]
+	ubusRaw := s["UBUSMODEM"]
+	cpeRaw := s["CPE"]
+
+	cell := CellularInfo{Installed: m.Init["qmodem"] || m.Init["modem_ctrl"]}
 	acc := &modemSignals{}
+	scan := &modemScan{cell: &cell, acc: acc}
 	var raws []string
+
+	// QModem Next 把模组配置写成 modem-device，旧版 QModem 用 modem。
+	sections, secIface := parseQmodemSections(uciRaw)
+	if len(sections) > 0 {
+		cell.Installed = true
+		cell.Devices = append(cell.Devices, sections...)
+	}
+	// 设备上真正暴露的 ubus 对象：modem_ctrl 属于 QModem Next，cpe_network 属于 CPE 面板。
+	if hasUbusObject(ubusRaw, "qmodem") || hasUbusObject(ubusRaw, "modem_ctrl") || hasUbusObject(ubusRaw, "cpe_network") {
+		cell.Installed = true
+	}
 
 	var q struct {
 		ModemInfo []map[string]any `json:"modem_info"`
 	}
-	if err := json.Unmarshal([]byte(raw), &q); err == nil {
+	if err := json.Unmarshal([]byte(raw), &q); err == nil && len(q.ModemInfo) > 0 {
 		cell.Count = len(q.ModemInfo)
-		if cell.Count > 0 {
-			raws = append(raws, raw)
-		}
+		raws = append(raws, raw)
 		for _, modem := range q.ModemInfo {
 			for _, key := range []string{"config_section", "device", "tty", "usb_path", "imei"} {
 				if v := asString(modem[key]); v != "" {
@@ -499,43 +522,112 @@ func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
 		}
 	}
 
-	// QModem 按配置段输出的 base_info / cell_info / network_info / dial_status。
-	secs := strings.Split(secsRaw, "##SEC ")
-	secCount := 0
-	for _, chunk := range secs[1:] {
-		secCount++
+	// QModem Next：modem_ctrl info 返回 {info:[{modem_info:[{key,value}]}]}。
+	var mc struct {
+		Info []struct {
+			ModemInfo []map[string]any `json:"modem_info"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal([]byte(ctrlRaw), &mc); err == nil && len(mc.Info) > 0 {
+		cell.Installed = true
+		if cell.Count == 0 {
+			cell.Count = len(mc.Info)
+		}
+		raws = append(raws, ctrlRaw)
+		for _, modem := range mc.Info {
+			for _, entry := range modem.ModemInfo {
+				if key := firstString(entry, "key"); key != "" {
+					scan.field(key, entry["value"])
+					continue
+				}
+				if v, ok := entry["value"]; ok {
+					if label := firstString(entry, "name", "full_name"); label != "" {
+						scan.field(label, v)
+						continue
+					}
+				}
+				scanModemSignals(entry, acc)
+			}
+		}
+	}
+
+	// 旧版 QModem 按配置段输出的 base_info / cell_info / network_info / dial_status。
+	for _, chunk := range strings.Split(secsRaw, "##SEC ")[1:] {
 		name := ""
 		body := chunk
 		if i := strings.IndexByte(chunk, '\n'); i >= 0 {
 			name = strings.TrimSpace(chunk[:i])
 			body = chunk[i+1:]
 		}
+		_ = name
 		raws = append(raws, chunk)
+		gotJSON := false
 		for _, v := range decodeJSONStream(body) {
+			gotJSON = true
 			if mm, ok := v.(map[string]any); ok {
 				if dev := asString(mm["device"]); strings.HasPrefix(dev, "/dev/") {
-					cell.Devices = append(cell.Devices, dev)
-				}
-				if name != "" && len(cell.Devices) == 0 {
-					cell.Devices = append(cell.Devices, name)
+					cell.Devices = appendUnique(cell.Devices, dev)
 				}
 			}
 			scanModemSignals(v, acc)
 		}
-	}
-	if secCount > cell.Count {
-		cell.Count = secCount
+		if gotJSON && cell.Count == 0 {
+			cell.Count = 1
+		}
 	}
 
+	// CPE 面板：cpe_network status 的 cellular 是这台设备实际使用的字段集合。
 	var cpe struct {
 		Cellular map[string]any `json:"cellular"`
 	}
+	cpePresent := false
 	if err := json.Unmarshal([]byte(cpeRaw), &cpe); err == nil && len(cpe.Cellular) > 0 {
-		if cell.Count == 0 {
-			cell.Count = len(cpe.Cellular)
-		}
-		scanModemSignals(cpe.Cellular, acc)
+		c := cpe.Cellular
 		raws = append(raws, cpeRaw)
+		if b, ok := c["present"].(bool); ok && b {
+			cpePresent = true
+			if cell.Count == 0 {
+				cell.Count = 1
+			}
+		}
+		if v := asString(c["device"]); v != "" {
+			if acc.iface == "" {
+				acc.iface = v
+			}
+			cell.Devices = appendUnique(cell.Devices, v)
+		}
+		if v := asString(c["model"]); v != "" && cell.Model == "" {
+			cell.Model = v
+		}
+		if v := asString(c["sim_status"]); v != "" {
+			cell.SIMStatus = v
+		}
+		if v := asString(c["band"]); v != "" {
+			cell.Band = v
+		}
+		if v := asString(c["radio"]); v != "" && acc.mode == "" {
+			acc.mode = normalizeMode(v)
+		}
+		if valid, _ := c["signal_valid"].(bool); valid {
+			if n, ok := intValue(c["nr_signal"]); ok && n != 0 {
+				acc.setInt(&acc.rsrp, &acc.hasRSRP, n)
+				if acc.mode == "" {
+					acc.mode = "5G"
+				}
+			} else if n, ok := intValue(c["lte_signal"]); ok && n != 0 {
+				acc.setInt(&acc.rsrp, &acc.hasRSRP, n)
+				if acc.mode == "" {
+					acc.mode = "4G"
+				}
+			}
+		}
+		if noSIM(cell.SIMStatus) {
+			acc.connected = false
+			acc.hasConn = true
+		} else if v := strings.ToLower(asString(c["connection"])); v != "" {
+			acc.connected = strings.Contains(v, "connected")
+			acc.hasConn = true
+		}
 	}
 
 	if acc.iface == "" {
@@ -550,6 +642,26 @@ func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
 					acc.iface = it.ID
 					break
 				}
+			}
+		}
+	}
+
+	devPresent := false
+	for _, line := range strings.Split(devsRaw, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, "/dev/cdc-wdm") {
+			devPresent = true
+			cell.Devices = appendUnique(cell.Devices, name)
+			continue
+		}
+		if isWWANName(name) {
+			devPresent = true
+			cell.Devices = appendUnique(cell.Devices, name)
+			if acc.iface == "" {
+				acc.iface = name
 			}
 		}
 	}
@@ -573,7 +685,15 @@ func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
 		cell.Connected = acc.connected
 		cell.Internet = acc.connected
 	}
-	cell.Present = cell.Count > 0 || cell.Interface != "" || acc.hasRSRP
+	cell.Present = cell.Count > 0 || cpePresent || devPresent || acc.hasRSRP
+	if cell.Present && cell.Interface == "" {
+		for _, sec := range sections {
+			if v := strings.TrimSpace(secIface[sec]); v != "" {
+				cell.Interface = v
+				break
+			}
+		}
+	}
 	cell.Installed = cell.Installed || cell.Present
 	if len(raws) > 0 {
 		cell.Raw = strings.Join(raws, "\n")
@@ -583,6 +703,145 @@ func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
 	}
 	m.Modem = cell
 	m.Caps.Cellular = cell.Present || cell.Installed
+}
+
+// modemScan 把 modem_ctrl 的 key/value 条目映射到统一的信号字段。
+type modemScan struct {
+	cell *CellularInfo
+	acc  *modemSignals
+}
+
+func (p *modemScan) field(key string, val any) {
+	k := strings.ToLower(strings.TrimSpace(key))
+	k = strings.ReplaceAll(k, "_", " ")
+	k = strings.Join(strings.Fields(k), " ")
+	switch k {
+	case "operator", "isp", "network operator", "carrier", "spn", "plmn":
+		if p.acc.operator == "" {
+			if s := strings.TrimSpace(asString(val)); s != "" && s != "00000" {
+				p.acc.operator = s
+			}
+		}
+	case "network type", "network mode", "mode", "rat", "act", "type":
+		if p.acc.mode == "" {
+			p.acc.mode = normalizeMode(asString(val))
+		}
+	case "rsrp", "lte rsrp", "nr rsrp", "5g rsrp":
+		if n, ok := intValue(val); ok && n != 0 {
+			p.acc.setInt(&p.acc.rsrp, &p.acc.hasRSRP, n)
+		}
+	case "rsrq", "lte rsrq", "nr rsrq":
+		if n, ok := intValue(val); ok && n != 0 {
+			p.acc.setInt(&p.acc.rsrq, &p.acc.hasRSRQ, n)
+		}
+	case "sinr", "snr", "lte sinr", "nr sinr":
+		if n, ok := intValue(val); ok {
+			p.acc.setInt(&p.acc.sinr, &p.acc.hasSINR, n)
+		}
+	case "rssi", "lte rssi", "nr rssi":
+		if n, ok := intValue(val); ok && n != 0 {
+			p.acc.setInt(&p.acc.rssi, &p.acc.hasRSSI, n)
+		}
+	case "sim status", "sim":
+		if p.cell.SIMStatus == "" {
+			p.cell.SIMStatus = strings.TrimSpace(asString(val))
+		}
+	case "model", "module", "name":
+		if p.cell.Model == "" {
+			p.cell.Model = strings.TrimSpace(asString(val))
+		}
+	case "band":
+		if p.cell.Band == "" {
+			p.cell.Band = strings.TrimSpace(asString(val))
+		}
+	case "interface", "iface", "network interface", "netdev":
+		if p.acc.iface == "" && isWWANName(asString(val)) {
+			p.acc.iface = asString(val)
+		}
+	}
+}
+
+var (
+	qmodemSecRe = regexp.MustCompile(`^qmodem\.([^.=\s]+)=modem(-device)?$`)
+	qmodemNetRe = regexp.MustCompile(`^qmodem\.([^.=\s]+)\.network=(.+)$`)
+	modemIntRe  = regexp.MustCompile(`-?\d+`)
+)
+
+func parseQmodemSections(raw string) ([]string, map[string]string) {
+	secs := []string{}
+	nets := map[string]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if m := qmodemSecRe.FindStringSubmatch(line); m != nil {
+			secs = append(secs, m[1])
+			continue
+		}
+		if m := qmodemNetRe.FindStringSubmatch(line); m != nil {
+			if v := strings.Trim(strings.TrimSpace(m[2]), "'\""); v != "" {
+				nets[m[1]] = v
+			}
+		}
+	}
+	return secs, nets
+}
+
+func hasUbusObject(raw, name string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func firstString(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(asString(m[k])); v != "" && v != "<nil>" {
+			return v
+		}
+	}
+	return ""
+}
+
+func intValue(v any) (int, bool) {
+	switch t := v.(type) {
+	case float64:
+		return int(t), true
+	case int:
+		return t, true
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return int(n), true
+		}
+		return 0, false
+	}
+	m := modemIntRe.FindString(asString(v))
+	if m == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func appendUnique(list []string, v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return list
+	}
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func noSIM(s string) bool {
+	u := strings.ToUpper(strings.TrimSpace(s))
+	return strings.Contains(u, "ABSENT") || strings.Contains(u, "NOT INSERTED") || strings.Contains(u, "NO SIM")
 }
 
 type modemSignals struct {

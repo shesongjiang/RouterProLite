@@ -34,9 +34,14 @@ func buildTiles(s *Snapshot, m *Meta) []Tile {
 				mode = "蜂窝"
 			}
 			tile.Status = mode
-			if m.Modem.Operator != "" {
+			switch {
+			case m.Modem.SIMStatus != "" && noSIM(m.Modem.SIMStatus):
+				tile.Subtitle = "未插 SIM 卡"
+			case m.Modem.Operator != "":
 				tile.Subtitle = m.Modem.Operator
-			} else {
+			case m.Modem.Model != "":
+				tile.Subtitle = m.Modem.Model
+			default:
 				tile.Subtitle = "已注册网络"
 			}
 			parts := []string{}

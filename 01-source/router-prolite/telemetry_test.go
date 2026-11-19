@@ -216,7 +216,7 @@ func TestBuildPorts(t *testing.T) {
 	meta := &Meta{
 		UCI:      map[string]UCIConfig{"network": {"wan6": {".type": "interface"}}},
 		Wireless: WirelessInfo{Present: true, Enabled: true, Channel: "149", Radios: []string{"radio0", "radio1"}},
-		Caps:     Capabilities{Cellular: true},
+		Caps:     Capabilities{Wireless: true, Cellular: true},
 		Modem:    CellularInfo{Present: true, Internet: true, Count: 1},
 	}
 	wan := &WANInfo{Up: true, Status: "UP", Proto: "dhcp", Device: "wan", LinkSpeed: "1000M FULL"}
@@ -244,10 +244,15 @@ func TestBuildPorts(t *testing.T) {
 
 	empty := &Meta{UCI: map[string]UCIConfig{"network": {}}}
 	ports = buildPorts(empty, &WANInfo{Up: false, Status: "DOWN"}, &WANInfo{}, &Rates{}, nil, "br-lan", false, nil)
-	if len(ports) != 4 {
-		t.Fatalf("expected 4 ports without cellular, got %d", len(ports))
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ports without wireless/cellular, got %d", len(ports))
 	}
-	if ports[1].State != "未配置" || ports[3].State != "无硬件" {
+	if ports[1].State != "未配置" {
 		t.Fatalf("unexpected states: %+v", ports)
+	}
+	for _, p := range ports {
+		if p.Key == "wifi" || p.Key == "cell" {
+			t.Fatalf("unexpected radio port without capabilities: %+v", p)
+		}
 	}
 }
