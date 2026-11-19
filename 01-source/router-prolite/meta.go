@@ -74,6 +74,8 @@ echo '@@TC'; command -v tc 2>/dev/null
 echo '@@RESOLV'; cat /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null
 echo '@@MWAN'; mwan3 status 2>/dev/null
 echo '@@MODEM'; ubus call qmodem info 2>/dev/null
+echo '@@QMODEM_NETIF'; ubus call qmodem get_network_interfaces 2>/dev/null
+echo '@@QMODEM_SECS'; for s in $(uci show qmodem 2>/dev/null | sed -n 's/^qmodem\.\([^.=]*\)=modem$/\1/p'); do echo "##SEC $s"; ubus call qmodem base_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem cell_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem network_info "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem dial_status "{\"config_section\":\"$s\"}" 2>/dev/null; ubus call qmodem get_connect_status "{\"config_section\":\"$s\"}" 2>/dev/null; done
 echo '@@CPE'; ubus call cpe_network status 2>/dev/null
 echo '@@END'; true`
 
@@ -298,7 +300,7 @@ func parseMetaOutput(out string) *Meta {
 	m.parseWireless()
 	m.parseDDNS()
 	m.parseWAN()
-	m.parseModem(s["MODEM"], s["CPE"])
+	m.parseModem(s["MODEM"], s["CPE"], s["QMODEM_SECS"], s["QMODEM_NETIF"])
 	m.parseMwan(s["MWAN"])
 
 	return m
@@ -473,49 +475,242 @@ func (m *Meta) parseWAN() {
 	}
 }
 
-func (m *Meta) parseModem(raw, cpeRaw string) {
-	cell := CellularInfo{}
+func (m *Meta) parseModem(raw, cpeRaw, secsRaw, netifRaw string) {
+	cell := CellularInfo{Installed: m.Init["qmodem"]}
+	acc := &modemSignals{}
+	var raws []string
+
 	var q struct {
 		ModemInfo []map[string]any `json:"modem_info"`
 	}
 	if err := json.Unmarshal([]byte(raw), &q); err == nil {
 		cell.Count = len(q.ModemInfo)
 		if cell.Count > 0 {
-			if pretty, err := json.MarshalIndent(q, "", "  "); err == nil {
-				cell.Raw = string(pretty)
+			raws = append(raws, raw)
+		}
+		for _, modem := range q.ModemInfo {
+			for _, key := range []string{"config_section", "device", "tty", "usb_path", "imei"} {
+				if v := asString(modem[key]); v != "" {
+					cell.Devices = append(cell.Devices, v)
+					break
+				}
 			}
-			for _, modem := range q.ModemInfo {
-				for _, key := range []string{"config_section", "device", "tty", "usb_path", "imei"} {
-					if v := asString(modem[key]); v != "" {
-						cell.Devices = append(cell.Devices, v)
-						break
-					}
+			scanModemSignals(modem, acc)
+		}
+	}
+
+	// QModem 按配置段输出的 base_info / cell_info / network_info / dial_status。
+	secs := strings.Split(secsRaw, "##SEC ")
+	secCount := 0
+	for _, chunk := range secs[1:] {
+		secCount++
+		name := ""
+		body := chunk
+		if i := strings.IndexByte(chunk, '\n'); i >= 0 {
+			name = strings.TrimSpace(chunk[:i])
+			body = chunk[i+1:]
+		}
+		raws = append(raws, chunk)
+		for _, v := range decodeJSONStream(body) {
+			if mm, ok := v.(map[string]any); ok {
+				if dev := asString(mm["device"]); strings.HasPrefix(dev, "/dev/") {
+					cell.Devices = append(cell.Devices, dev)
+				}
+				if name != "" && len(cell.Devices) == 0 {
+					cell.Devices = append(cell.Devices, name)
+				}
+			}
+			scanModemSignals(v, acc)
+		}
+	}
+	if secCount > cell.Count {
+		cell.Count = secCount
+	}
+
+	var cpe struct {
+		Cellular map[string]any `json:"cellular"`
+	}
+	if err := json.Unmarshal([]byte(cpeRaw), &cpe); err == nil && len(cpe.Cellular) > 0 {
+		if cell.Count == 0 {
+			cell.Count = len(cpe.Cellular)
+		}
+		scanModemSignals(cpe.Cellular, acc)
+		raws = append(raws, cpeRaw)
+	}
+
+	if acc.iface == "" {
+		var ni struct {
+			Interfaces []struct {
+				ID string `json:"id"`
+			} `json:"interfaces"`
+		}
+		if json.Unmarshal([]byte(netifRaw), &ni) == nil {
+			for _, it := range ni.Interfaces {
+				if isWWANName(it.ID) {
+					acc.iface = it.ID
+					break
 				}
 			}
 		}
 	}
-	var cpe struct {
-		Internet   bool           `json:"internet"`
-		Cellular   map[string]any `json:"cellular"`
-		Interfaces map[string]any `json:"interfaces"`
+
+	cell.Mode = acc.mode
+	cell.Operator = acc.operator
+	cell.Interface = acc.iface
+	if acc.hasRSRP {
+		cell.RSRP = acc.rsrp
 	}
-	if err := json.Unmarshal([]byte(cpeRaw), &cpe); err == nil {
-		cell.Internet = cpe.Internet
-		if len(cpe.Cellular) > 0 && cell.Count == 0 {
-			cell.Count = len(cpe.Cellular)
-		}
-		if cell.Raw == "" && (len(cpe.Cellular) > 0 || len(cpe.Interfaces) > 0) {
-			if pretty, err := json.MarshalIndent(cpe, "", "  "); err == nil {
-				cell.Raw = string(pretty)
-			}
-		}
+	if acc.hasRSRQ {
+		cell.RSRQ = acc.rsrq
 	}
-	cell.Present = cell.Count > 0
+	if acc.hasSINR {
+		cell.SINR = acc.sinr
+	}
+	if acc.hasRSSI {
+		cell.RSSI = acc.rssi
+	}
+	if acc.hasConn {
+		cell.Connected = acc.connected
+		cell.Internet = acc.connected
+	}
+	cell.Present = cell.Count > 0 || cell.Interface != "" || acc.hasRSRP
+	cell.Installed = cell.Installed || cell.Present
+	if len(raws) > 0 {
+		cell.Raw = strings.Join(raws, "\n")
+	}
 	if len(cell.Raw) > 4000 {
 		cell.Raw = cell.Raw[:4000] + "\n..."
 	}
 	m.Modem = cell
-	m.Caps.Cellular = cell.Present
+	m.Caps.Cellular = cell.Present || cell.Installed
+}
+
+type modemSignals struct {
+	rsrp, rsrq, sinr, rssi             int
+	hasRSRP, hasRSRQ, hasSINR, hasRSSI bool
+	mode, operator, iface              string
+	connected                          bool
+	hasConn                            bool
+}
+
+func (a *modemSignals) setInt(dst *int, has *bool, v any) {
+	if *has {
+		return
+	}
+	s := strings.TrimSpace(asString(v))
+	if s == "" {
+		return
+	}
+	n, err := strconv.Atoi(strings.Fields(s)[0])
+	if err != nil {
+		return
+	}
+	*dst = n
+	*has = true
+}
+
+func scanModemSignals(v any, acc *modemSignals) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			switch strings.ToLower(k) {
+			case "rsrp", "rsrp_dbm":
+				acc.setInt(&acc.rsrp, &acc.hasRSRP, val)
+			case "rsrq", "rsrq_db":
+				acc.setInt(&acc.rsrq, &acc.hasRSRQ, val)
+			case "sinr", "sinr_db":
+				acc.setInt(&acc.sinr, &acc.hasSINR, val)
+			case "rssi", "rssi_dbm":
+				acc.setInt(&acc.rssi, &acc.hasRSSI, val)
+			case "network_mode", "net_mode", "network_type", "net_type", "mode", "act", "type":
+				if acc.mode == "" {
+					acc.mode = normalizeMode(asString(val))
+				}
+			case "operator", "operator_name", "network_operator", "carrier", "spn", "plmn":
+				if acc.operator == "" {
+					if s := strings.TrimSpace(asString(val)); s != "" && s != "00000" {
+						acc.operator = s
+					}
+				}
+			case "interface", "iface", "network_interface", "netdev", "device":
+				if acc.iface == "" && isWWANName(asString(val)) {
+					acc.iface = asString(val)
+				}
+			case "connected", "internet":
+				if b, ok := val.(bool); ok {
+					acc.connected = b
+					acc.hasConn = true
+				}
+			case "up":
+				if b, ok := val.(bool); ok && !acc.hasConn {
+					acc.connected = b
+				}
+			case "status", "state", "connect_status", "dial_status", "registration":
+				if acc.hasConn {
+					break
+				}
+				s := strings.ToLower(asString(val))
+				if strings.Contains(s, "connected") || strings.Contains(s, "online") || strings.Contains(s, "registered") || s == "up" {
+					acc.connected = true
+					acc.hasConn = true
+				} else if strings.Contains(s, "disconnect") || strings.Contains(s, "down") || s == "idle" {
+					acc.connected = false
+					acc.hasConn = true
+				}
+			}
+			scanModemSignals(val, acc)
+		}
+	case []any:
+		for _, it := range x {
+			scanModemSignals(it, acc)
+		}
+	}
+}
+
+func decodeJSONStream(s string) []any {
+	out := []any{}
+	dec := json.NewDecoder(strings.NewReader(s))
+	for {
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			break
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func normalizeMode(s string) string {
+	u := strings.ToUpper(strings.TrimSpace(s))
+	switch {
+	case u == "":
+		return ""
+	case strings.Contains(u, "NR") || strings.Contains(u, "5G"):
+		return "5G"
+	case strings.Contains(u, "LTE") || strings.Contains(u, "4G"):
+		return "4G"
+	case strings.Contains(u, "WCDMA") || strings.Contains(u, "3G"):
+		return "3G"
+	case strings.Contains(u, "GSM") || strings.Contains(u, "2G"):
+		return "2G"
+	}
+	return ""
+}
+
+func isWWANName(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, p := range []string{"wwan", "usb", "ppp", "rmnet"} {
+		if strings.HasPrefix(s, p) {
+			rest := strings.TrimPrefix(s, p)
+			if rest == "" {
+				return true
+			}
+			if _, err := strconv.Atoi(rest); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 var mwanLineRe = regexp.MustCompile(`(?m)^\s*interface\s+(\S+)\s+is\s+(.+?)\s*$`)

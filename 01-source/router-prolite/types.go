@@ -130,6 +130,7 @@ type Tile struct {
 	Title      string `json:"title"`
 	Status     string `json:"status"`
 	Subtitle   string `json:"subtitle"`
+	Detail     string `json:"detail,omitempty"`
 	Tone       string `json:"tone"`
 	Active     bool   `json:"active"`
 	Toggleable bool   `json:"toggleable"`
@@ -215,11 +216,20 @@ type BlockRule struct {
 }
 
 type CellularInfo struct {
-	Present  bool     `json:"present"`
-	Internet bool     `json:"internet"`
-	Count    int      `json:"count"`
-	Raw      string   `json:"raw"`
-	Devices  []string `json:"devices"`
+	Present   bool     `json:"present"`
+	Installed bool     `json:"installed"`
+	Internet  bool     `json:"internet"`
+	Connected bool     `json:"connected"`
+	Count     int      `json:"count"`
+	Mode      string   `json:"mode,omitempty"`
+	Operator  string   `json:"operator,omitempty"`
+	Interface string   `json:"interface,omitempty"`
+	RSRP      int      `json:"rsrp,omitempty"`
+	RSRQ      int      `json:"rsrq,omitempty"`
+	SINR      int      `json:"sinr,omitempty"`
+	RSSI      int      `json:"rssi,omitempty"`
+	Raw       string   `json:"raw"`
+	Devices   []string `json:"devices"`
 }
 
 type MWANInterface struct {

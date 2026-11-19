@@ -13,6 +13,8 @@
     snap: null,
     lab: null,
     connected: false,
+    linkDown: false,
+    lastConn: null,
     leaving: false,
     auth: 'none',
     theme: 'dark',
@@ -52,17 +54,11 @@
     pollGen: 0,
     lastPollError: 0,
     toastTimes: {},
-    install: {
-      env: null,
-      envErr: '',
+    storage: {
+      view: null,
       loading: false,
-      starting: false,
-      mode: 'feed',
-      pkg: '',
-      path: '',
-      jobId: '',
-      job: null,
-      pollTimer: null,
+      err: '',
+      busy: false,
     },
     market: {
       env: null,
@@ -255,6 +251,20 @@
     return api;
   }
 
+  let mockStorageDevices = null;
+  function mockStorageView() {
+    if (!mockStorageDevices) {
+      mockStorageDevices = [
+        { device: '/dev/sda', name: 'sda', label: 'MJRO1810', fsType: 'iso9660', uuid: '2019-09-11-15-21-05-00', sizeKb: 15360000, mounted: false, mountPoint: '', removable: true, role: '系统运行盘（整盘）', protected: true, blockedReason: '整盘包含当前系统的挂载分区，禁止挂载/卸载', fsSupported: true, mountTarget: '/mnt/sda', reason: '' },
+        { device: '/dev/sda1', name: 'sda1', label: 'MISO_EFI', fsType: 'vfat', uuid: '07E3-BFF9', sizeKb: 4096, mounted: false, mountPoint: '', removable: true, role: 'EFI 启动分区', protected: true, blockedReason: '系统启动盘的 EFI 分区，禁止操作', fsSupported: true, mountTarget: '/mnt/sda1', reason: '' },
+        { device: '/dev/sda2', name: 'sda2', label: 'extroot', fsType: 'ext4', uuid: '227513be-7afa-472d-ae3d-5ace88494355', sizeKb: 12876800, mounted: true, mountPoint: '/overlay', removable: true, role: '系统可写层（overlay）', protected: true, blockedReason: '系统可写层，卸载会让系统立即失去可写层，禁止操作', fsSupported: true, mountTarget: '/mnt/sda2', reason: '' },
+        { device: '/dev/sdb1', name: 'sdb1', label: 'BACKUP', fsType: 'ext4', uuid: '5f2c9a1e', sizeKb: 976762584, mounted: true, mountPoint: '/mnt/sdb1', removable: true, role: '已挂载数据盘', protected: false, blockedReason: '', fsSupported: true, mountTarget: '/mnt/sdb1', reason: '' },
+        { device: '/dev/sdc1', name: 'sdc1', label: '', fsType: '', uuid: '', sizeKb: 31250000, mounted: false, mountPoint: '', removable: true, role: '可移动数据分区', protected: false, blockedReason: '', fsSupported: false, mountTarget: '/mnt/sdc1', reason: '未识别到文件系统，可能未格式化或分区表损坏' },
+      ];
+    }
+    return { connected: true, host: '192.168.100.1', devices: mockStorageDevices.map((d) => ({ ...d })), note: '' };
+  }
+
   function mockApi() {
     const t0 = Date.now();
     const startedAt = Math.floor(Date.now() / 1000);
@@ -289,7 +299,7 @@
       { key: 'mwan3', name: 'MWAN3 多线', running: false, enabled: false },
     ];
     const caps = {
-      wireless: true, cellular: false, sqm: true, adguard: true, doh: false, ddns: true,
+      wireless: false, cellular: true, sqm: true, adguard: true, doh: false, ddns: true,
       fullcone: true, tc: true, mwan3: false, temperature: true, proxy: true, dnsmasq: true,
     };
     const info = {
@@ -303,7 +313,7 @@
 
     function tiles() {
       const out = [];
-      out.push({ key: 'wifi', title: 'Wi-Fi', status: wifiOn ? 'WIFI' : 'OFF', subtitle: wifiOn ? 'ProLite-5G · CH149' : '无线未启用', tone: 'blue', active: wifiOn, toggleable: false, on: wifiOn, action: 'section:network' });
+      out.push({ key: 'cellular', title: '蜂窝网络', status: '无模组', subtitle: '未检测到模组', tone: 'muted', active: false, toggleable: false, on: false, action: 'section:network' });
       if (sqmOn !== null) out.push({ key: 'sqm', title: 'SQM QoS', status: sqmOn ? 'CAKE' : 'OFF', subtitle: '抗缓冲膨胀 · 低抖动', tone: 'green', active: sqmOn, toggleable: true, on: sqmOn, action: 'toggle:sqm' });
       out.push({ key: 'adguard', title: 'AdGuard DNS', status: adOn ? 'ON' : 'OFF', subtitle: 'DNS 过滤 · 去广告', tone: 'blue', active: adOn, toggleable: true, on: adOn, action: 'toggle:AdGuardHome' });
       out.push({ key: 'proxy', title: 'Smart Proxy', status: proxyOn ? 'ON' : 'OFF', subtitle: '透明代理 · 分流规则', tone: 'blue', active: proxyOn, toggleable: true, on: proxyOn, action: 'toggle:passwall' });
@@ -321,7 +331,6 @@
         { key: 'wan', label: 'WAN', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'pppoe · wan', speed: wanUp ? '1000M FULL' : '' },
         { key: 'wan6', label: 'WAN6', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'IPv6 · wan6' },
         { key: 'lan', label: 'LAN', up: true, state: 'UP', detail: 'br-lan · ' + online + ' 台在线', speed: '1000M FULL', clients: online },
-        { key: 'wifi', label: 'WiFi', up: wifiOn, state: wifiOn ? 'UP' : 'OFF', detail: 'CH 149 · 1 射频' },
       ];
     }
 
@@ -563,6 +572,30 @@
       },
       Disconnect: async () => { connected = false; },
       GetSnapshot: async () => { await sleep(40); return snapshot(); },
+      GetStorageDevices: async () => { await sleep(140); return mockStorageView(); },
+      MountStorage: async (inp) => {
+        await sleep(260);
+        if (!inp || !inp.confirmed || inp.confirmText !== cfg.host) throw new Error('请先确认挂载操作');
+        const d = (mockStorageDevices || []).find((x) => x.device === inp.device);
+        if (!d) throw new Error('DEVICE_NOT_FOUND：未识别到该设备');
+        if (d.protected) throw new Error('SYSTEM_DISK：' + (d.blockedReason || '系统运行盘，禁止操作'));
+        if (d.mounted) throw new Error('MOUNT_BUSY：设备已挂载');
+        if (!d.fsType) throw new Error('FS_UNKNOWN：未识别到文件系统，可能未格式化');
+        d.mounted = true;
+        d.mountPoint = inp.mountPoint || d.mountTarget;
+        return mockStorageView();
+      },
+      UnmountStorage: async (inp) => {
+        await sleep(220);
+        if (!inp || !inp.confirmed || inp.confirmText !== cfg.host) throw new Error('请先确认卸载操作');
+        const d = (mockStorageDevices || []).find((x) => x.device === inp.device);
+        if (!d) throw new Error('DEVICE_NOT_FOUND：未识别到该设备');
+        if (d.protected) throw new Error('SYSTEM_DISK：' + (d.blockedReason || '系统运行盘，禁止操作'));
+        if (!d.mounted) throw new Error('NOT_MOUNTED：设备当前未挂载');
+        d.mounted = false;
+        d.mountPoint = '';
+        return mockStorageView();
+      },
       GetPluginMarket: async () => {
         await sleep(160);
         return {
@@ -779,6 +812,12 @@
         remember: $('#rememberInput').checked,
       });
       $('#passwordInput').value = '';
+      state.lastConn = {
+        host, port, user,
+        auth: state.auth,
+        keyPath: $('#keyPathInput').value.trim(),
+        passphrase: $('#passphraseInput').value,
+      };
       state.info = info;
       enterMain(info);
     } catch (e) {
@@ -803,9 +842,66 @@
     state.pinned = !!cfg.pinned;
   }
 
+  function updateReconnectUI() {
+    const can = !!state.lastConn;
+    const mainBtn = $('#reconnectBtn');
+    if (mainBtn) mainBtn.classList.toggle('hidden', !(state.linkDown && can));
+    const connectBtn = $('#connectReconnectBtn');
+    if (connectBtn) connectBtn.classList.toggle('hidden', !(!state.connected && can));
+  }
+
+  function setReconnectBusy(busy) {
+    ['#reconnectBtn', '#connectReconnectBtn'].forEach((sel) => {
+      const btn = $(sel);
+      if (!btn) return;
+      btn.disabled = busy;
+      const label = btn.lastChild;
+      if (label && label.nodeType === 3) label.nodeValue = busy ? ' 连接中…' : ' 重新连接';
+    });
+  }
+
+  async function reconnectLast() {
+    const lc = state.lastConn;
+    if (!lc) { toast('没有可重连的设备记录', 'info'); return; }
+    if (!state.api) {
+      showConnectError('未检测到 Pro-Lite 桌面运行时。请运行桌面程序。');
+      return;
+    }
+    if (lc.auth === 'password') {
+      leaveToConnect('重新连接需要再次输入密码。');
+      const pw = $('#passwordInput');
+      if (pw) pw.focus();
+      return;
+    }
+    fillConfig({
+      host: lc.host, port: lc.port, user: lc.user, auth: lc.auth,
+      keyPath: lc.keyPath, saved: true,
+      fingerprint: (state.cfg && state.cfg.fingerprint) || '',
+    });
+    $('#passphraseInput').value = lc.passphrase || '';
+    setReconnectBusy(true);
+    try {
+      const info = await state.api.Connect({
+        host: lc.host, port: lc.port, user: lc.user, auth: lc.auth,
+        keyPath: lc.keyPath || '', passphrase: lc.passphrase || '',
+        password: '', remember: !!(state.cfg && state.cfg.saved),
+      });
+      state.info = info;
+      enterMain(info);
+      toast('已重新连接 ' + (info.hostname || info.host || lc.host), 'ok');
+    } catch (e) {
+      state.linkDown = true;
+      updateReconnectUI();
+      toastError(e);
+    } finally {
+      setReconnectBusy(false);
+    }
+  }
+
   /* ================= main entry ================= */
   function enterMain(info) {
     state.connected = true;
+    state.linkDown = false;
     state.leaving = false;
     state.info = info || state.info;
     state.tileSig = '';
@@ -827,6 +923,7 @@
     $('#hostName').textContent = (state.info && (state.info.hostname || state.info.host)) || 'Pro-Lite';
     refreshSnapshot(true);
     startPolling();
+    updateReconnectUI();
   }
 
   function stopPolling() {
@@ -890,13 +987,17 @@
     const banner = $('#connBanner');
     if (!snap.connected) {
       dot.className = 'status-dot err';
-      const msg = snap.error || 'SSH 连接已断开，正在自动重连…';
+      state.linkDown = true;
+      const msg = snap.error || 'SSH 连接已断开，可点击右上角“重新连接”。';
       banner.textContent = msg;
       banner.classList.remove('hidden');
+      updateReconnectUI();
       return;
     }
     dot.className = 'status-dot';
+    state.linkDown = false;
     banner.classList.add('hidden');
+    updateReconnectUI();
     renderSnapshot(snap);
   }
 
@@ -1007,7 +1108,7 @@
 
   function renderTiles(tiles) {
     const grid = $('#tilesGrid');
-    const sig = JSON.stringify(tiles.map((t) => [t.key, t.status, t.subtitle, t.active, t.on, t.action]));
+    const sig = JSON.stringify(tiles.map((t) => [t.key, t.status, t.subtitle, t.detail, t.active, t.on, t.action]));
     grid.className = 'tiles count-' + tiles.length;
     if (sig === state.tileSig) return;
     state.tileSig = sig;
@@ -1029,6 +1130,7 @@
         '<span class="tile-title">' + esc(t.title) + '</span>' +
         '<span class="tile-status ' + esc(tone) + '">' + esc(t.status) + '</span></div>' +
         '<div class="tile-sub">' + esc(t.subtitle) + '</div>' +
+        (t.detail ? '<div class="tile-detail mono">' + esc(t.detail) + '</div>' : '') +
         '<div class="tile-foot">' + esc(foot) + '</div></button>';
     }).join('');
   }
@@ -1289,23 +1391,7 @@
     if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); return; }
     if (state.labTab === 'tools') await fetchLab();
     else await fetchConsole();
-    if (state.labTab === 'console' && state.cTab === 'install') ensurePkgEnv(false);
     if (focus) scrollLab(focus);
-  }
-
-  async function openInstallPage() {
-    state.labTab = 'console';
-    state.cTab = 'install';
-    state.labOpen = true;
-    const view = $('#labView');
-    if (view) {
-      view.classList.add('open');
-      view.setAttribute('aria-hidden', 'false');
-    }
-    renderLab();
-    const scroll = $('#labScroll');
-    if (scroll) scroll.scrollTop = 0;
-    ensurePkgEnv(false);
   }
 
   function closeLab() {
@@ -1456,8 +1542,6 @@
     $$('.lab-tabs button').forEach((b) => {
       if (b.dataset.labtab) b.classList.toggle('active', b.dataset.labtab === state.labTab);
     });
-    const instBtn = $('#labInstallTab');
-    if (instBtn) instBtn.classList.toggle('on', state.labTab === 'console' && state.cTab === 'install');
     if (state.labTab === 'tools') renderTools();
     else if (state.labTab === 'market') renderMarket();
     else renderConsole();
@@ -1465,7 +1549,7 @@
 
   /* ================= console ================= */
   const CONSOLE_TABS = [
-    ['install', '安装'], ['overview', '概览'], ['system', '系统'], ['network', '接口'], ['wireless', '无线'],
+    ['overview', '概览'], ['system', '系统'], ['network', '接口'], ['wireless', '无线'],
     ['plugins', '插件'], ['packages', '软件包'], ['dhcp', 'DHCP'], ['firewall', '防火墙'],
     ['config', '配置'], ['logs', '日志'], ['process', '进程'], ['storage', '存储'],
   ];
@@ -1479,7 +1563,7 @@
     if (key === 'logs' && !state.logOut && !state.logLoading) fetchLogs();
     if (key === 'config') ensureConfigData();
     if (key === 'plugins' && !state.console) fetchConsole();
-    if (key === 'install') ensurePkgEnv(false);
+    if (key === 'storage') fetchStorage();
   }
 
   function pctBar(pct, tone) {
@@ -1559,7 +1643,6 @@
       case 'logs': return consoleLogs(c);
       case 'process': return consoleProcesses(c);
       case 'storage': return consoleStorage(c);
-      case 'install': return consoleInstall(c);
       default: return consoleOverview(c);
     }
   }
@@ -1580,94 +1663,6 @@
 
   function instChip(label, value, tone) {
     return '<span class="inst-chip ' + esc(tone || '') + '"><em>' + esc(label) + '</em><b>' + esc(value || '—') + '</b></span>';
-  }
-
-  async function ensurePkgEnv(force) {
-    const st = state.install;
-    if (!state.connected) {
-      st.env = null;
-      st.envErr = '未连接设备：安装预检不可用，请先连接路由器。';
-      return;
-    }
-    if (MOCK) {
-      st.envErr = '预览模式不连接设备；安装链路需要真实 SSH 连接。';
-      return;
-    }
-    if (!state.api || !state.api.GetPkgEnv) {
-      st.envErr = '后端接口不可用';
-      return;
-    }
-    if (st.loading) return;
-    if (st.env && !force) return;
-    st.loading = true;
-    renderConsole();
-    try {
-      st.env = await state.api.GetPkgEnv();
-      st.envErr = '';
-    } catch (e) {
-      st.envErr = errText(e);
-    } finally {
-      st.loading = false;
-      renderConsole();
-    }
-  }
-
-  function consoleInstall() {
-    const st = state.install;
-    const offline = !state.connected;
-    let h = sectionHead('plugins', '安装预演', 'M1：桌面下载 → 校验 → 上传 → 离线 dry-run');
-    if (offline) h += '<div class="note bad">未连接设备：安装预检不可用，请先连接路由器。</div>';
-    if (!offline && st.envErr) h += '<div class="note bad">' + esc(st.envErr) + '</div>';
-    if (!offline && !st.loading && !st.env) {
-      h += '<div class="row-actions"><button class="btn ghost" data-act="install-env">重试读取环境</button></div>';
-    }
-    if (st.loading) h += '<div class="note">正在读取设备包环境…</div>';
-
-    if (st.env) {
-      const e = st.env;
-      h += '<div class="inst-env">' +
-        instChip('包管理器', e.manager || '未检测到', e.manager ? 'ok' : 'bad') +
-        instChip('架构', e.arch, e.arch ? 'ok' : 'bad') +
-        instChip('内核', e.kernel, 'ok') +
-        instChip('内核包', e.kernelPkg, 'ok') +
-        instChip('overlay 可用', instBytes((e.overlayKb || 0) * 1024), (e.overlayKb || 0) > 0 ? 'ok' : 'warn') +
-        instChip('/tmp 可用', instBytes((e.tmpKb || 0) * 1024), (e.tmpKb || 0) > 0 ? 'ok' : 'warn') +
-        instChip('SFTP', e.sftpServer || '未安装（回退 cat）', e.sftpServer ? 'ok' : 'warn') +
-        '</div>';
-      if (e.release) h += '<div class="inst-sub">' + esc(e.release) + '</div>';
-      if (e.notes && e.notes.length) {
-        h += '<div class="note">' + e.notes.map((n) => esc(n)).join('<br>') + '</div>';
-      }
-      if (e.feeds && e.feeds.length) {
-        h += '<div class="inst-feeds">' + e.feeds.map((f) =>
-          '<div class="inst-feed"><b>' + esc(f.name) + '</b><span>' + esc(f.url) + '</span></div>').join('') + '</div>';
-      } else {
-        h += '<div class="note bad">设备没有可用的 apk/opkg 源配置，无法在桌面端解析依赖。</div>';
-      }
-      h += '<div class="row-actions"><button class="btn ghost" data-act="install-env">刷新环境</button></div>';
-    }
-
-    h += '<div class="inst-form">';
-    h += '<div class="inst-modes">' +
-      '<button class="btn seg' + (st.mode === 'feed' ? ' on' : '') + '" data-act="install-mode" data-mode="feed">从设备源下载</button>' +
-      '<button class="btn seg' + (st.mode === 'local' ? ' on' : '') + '" data-act="install-mode" data-mode="local">本地包文件</button>' +
-      '</div>';
-    if (st.mode === 'feed') {
-      h += '<label class="field"><span>包名</span><input id="installPkg" class="input" placeholder="例如 luci-app-passwall" value="' + esc(st.pkg) + '"' + ((st.starting || offline) ? ' disabled' : '') + '></label>';
-    } else {
-      h += '<label class="field"><span>本地文件</span><input id="installPath" class="input" readonly placeholder="选择 .ipk / .apk" value="' + esc(st.path) + '"></label>';
-      h += '<div class="row-actions"><button class="btn ghost" data-act="install-pick"' + (offline ? ' disabled' : '') + '>选择文件</button></div>';
-    }
-    h += '<div class="inst-dry">dry-run 已强制开启；需要真实安装请使用“插件市场”的精选插件流程，本页不会写入包数据库或配置。</div>';
-    h += '<div class="row-actions">';
-    h += '<button class="btn primary" data-act="install-start"' + ((st.starting || offline) ? ' disabled' : '') + '>开始 dry-run 预演</button>';
-    if (st.job && st.job.running) h += '<button class="btn ghost" data-act="install-cancel">取消任务</button>';
-    if (st.job && !st.job.running) h += '<button class="btn ghost" data-act="install-reset">清除结果</button>';
-    h += '<button class="btn" disabled title="真实安装请使用插件市场的精选插件流程">真实安装请走插件市场</button>';
-    h += '</div></div>';
-
-    if (st.job) h += installJobHtml(st.job);
-    return h;
   }
 
   function installJobHtml(job) {
@@ -1736,64 +1731,6 @@
     }
     h += '</div>';
     return h;
-  }
-
-  async function startInstallJob() {
-    const st = state.install;
-    if (!state.connected) { toast('未连接设备，安装预检不可用', 'info'); return; }
-    if (MOCK) { toast('预览模式不支持安装', 'info'); return; }
-    if (st.starting) return;
-    if (st.mode === 'feed' && !String(st.pkg || '').trim()) { toast('请输入包名', 'info'); return; }
-    if (st.mode === 'local' && !String(st.path || '').trim()) { toast('请选择本地包文件', 'info'); return; }
-    st.starting = true;
-    st.job = null;
-    st.jobId = '';
-    renderConsole();
-    try {
-      const id = await state.api.StartInstallJob({
-        mode: st.mode,
-        package: String(st.pkg || '').trim(),
-        version: '',
-        localPath: String(st.path || '').trim(),
-        dryRun: true,
-      });
-      st.jobId = id;
-      pollInstallJob(id);
-    } catch (e) {
-      st.starting = false;
-      toastError(e);
-      renderConsole();
-    }
-  }
-
-  async function pollInstallJob(id) {
-    const st = state.install;
-    clearTimeout(st.pollTimer);
-    try {
-      const job = await state.api.GetInstallJob(id);
-      st.job = job;
-      st.starting = false;
-      renderConsole();
-      if (job && job.running) {
-        st.pollTimer = setTimeout(() => pollInstallJob(id), 800);
-      }
-    } catch (e) {
-      st.starting = false;
-      toastError(e);
-      renderConsole();
-    }
-  }
-
-  async function pickLocalPackage() {
-    try {
-      const p = await state.api.PickPackageFile();
-      if (p) {
-        state.install.path = p;
-        renderConsole();
-      }
-    } catch (e) {
-      toastError(e);
-    }
   }
 
   /* ================= 插件市场 ================= */
@@ -2641,7 +2578,87 @@
       (rows || '<div class="empty">未读取到进程</div>') + '</div>';
   }
 
+  async function fetchStorage() {
+    const st = state.storage;
+    if (!state.connected) {
+      st.err = '未连接设备：连接后才能识别可移动存储。';
+      st.view = null;
+      renderConsole();
+      return;
+    }
+    if (MOCK) {
+      st.err = '';
+      st.view = mockStorageView();
+      renderConsole();
+      return;
+    }
+    if (!state.api || !state.api.GetStorageDevices || st.loading) return;
+    st.loading = true;
+    st.err = '';
+    renderConsole();
+    try {
+      st.view = await state.api.GetStorageDevices();
+    } catch (e) {
+      st.err = errText(e);
+    } finally {
+      st.loading = false;
+      renderConsole();
+    }
+  }
+
+  function storageDeviceByPath(path) {
+    const list = (state.storage.view && state.storage.view.devices) || [];
+    return list.find((d) => d.device === path) || null;
+  }
+
+  async function mountStorage(dev) {
+    const st = state.storage;
+    const host = (state.info && state.info.host) || '';
+    if (!host) { toast('缺少当前设备地址，请重新连接', 'info'); return; }
+    if (st.busy) return;
+    st.busy = true;
+    st.err = '';
+    renderConsole();
+    try {
+      st.view = await state.api.MountStorage({
+        device: dev.device, mountPoint: dev.mountTarget,
+        confirmText: host, confirmed: true,
+      });
+      toast('已挂载 ' + dev.device, 'ok');
+    } catch (e) {
+      st.err = errText(e);
+      toastError(e);
+    } finally {
+      st.busy = false;
+      renderConsole();
+    }
+  }
+
+  async function unmountStorage(dev) {
+    const st = state.storage;
+    const host = (state.info && state.info.host) || '';
+    if (!host) { toast('缺少当前设备地址，请重新连接', 'info'); return; }
+    if (st.busy) return;
+    st.busy = true;
+    st.err = '';
+    renderConsole();
+    try {
+      st.view = await state.api.UnmountStorage({
+        device: dev.device, mountPoint: dev.mountPoint,
+        confirmText: host, confirmed: true,
+      });
+      toast('已卸载 ' + dev.device, 'ok');
+    } catch (e) {
+      st.err = errText(e);
+      toastError(e);
+    } finally {
+      st.busy = false;
+      renderConsole();
+    }
+  }
+
   function consoleStorage(c) {
+    const st = state.storage;
     const df = (c.storage || []).map((s) =>
       '<div class="list-row"><div class="grow"><div class="mono">' + esc(s.filesystem) + '</div><div class="mono">' + esc(s.mount) + '</div></div>' +
       '<span class="mono">' + esc(s.used) + ' / ' + esc(s.size) + ' · ' + esc(s.usePct) + '</span></div>'
@@ -2650,7 +2667,47 @@
       '<div class="list-row"><span class="mono">' + esc(m.device) + '</span><span class="grow"></span>' +
       '<span class="mono">' + esc(m.mount) + ' · ' + esc(m.fs) + '</span></div>'
     ).join('');
+
+    const view = st.view;
+    let devices = '';
+    if (st.loading) devices = '<div class="note">正在读取块设备…</div>';
+    else if (st.err) devices = '<div class="note bad">' + esc(st.err) + '</div>';
+    else if (!view) devices = '<div class="note">切换到本页后会自动识别 U 盘与移动硬盘。</div>';
+    else if (!view.devices || !view.devices.length) devices = '<div class="note">' + esc(view.note || '没有识别到块设备。') + '</div>';
+    else {
+      devices = view.devices.map((d) => {
+        const mounted = !!d.mounted;
+        const canMount = !mounted && !d.reason && d.fsSupported && !d.protected;
+        const status = mounted ? '<span class="usb-status on">已挂载</span>' : '<span class="usb-status">未挂载</span>';
+        const target = mounted ? ('当前挂载点 ' + d.mountPoint) : ('未挂载 · 目标 ' + d.mountTarget);
+        let action;
+        if (d.protected) {
+          const label = mounted ? '卸载' : '挂载';
+          action = '<button type="button" class="btn mini ghost" disabled title="' + esc(d.blockedReason || '系统运行盘，禁止操作') + '">' + label + '</button>';
+        } else if (mounted) {
+          action = '<button type="button" class="btn mini ghost" data-act="storage-unmount" data-dev="' + esc(d.device) + '"' + (st.busy ? ' disabled' : '') + '>卸载</button>';
+        } else {
+          action = '<button type="button" class="btn mini primary" data-act="storage-mount" data-dev="' + esc(d.device) + '"' + (canMount && !st.busy ? '' : ' disabled') + '>挂载</button>';
+        }
+        return '<div class="usb-card' + (d.protected ? ' sys' : '') + '">' +
+          '<div class="usb-head"><span class="mono usb-dev">' + esc(d.device) + '</span>' +
+          (d.label ? '<span class="usb-label">' + esc(d.label) + '</span>' : '') +
+          (d.removable ? '<span class="usb-rem">可移动</span>' : '') + status + '</div>' +
+          '<div class="usb-role' + (d.protected ? ' sys' : '') + '">' + esc(d.role || '块设备') + '</div>' +
+          '<div class="usb-meta">' + esc(d.fsType || '未知文件系统') + ' · ' + esc(instBytes((d.sizeKb || 0) * 1024)) +
+          (d.uuid ? ' · ' + esc(d.uuid) : '') + '</div>' +
+          '<div class="usb-meta">' + esc(target) + '</div>' +
+          (d.protected && d.blockedReason ? '<div class="note bad">' + esc(d.blockedReason) + '</div>' : '') +
+          (!d.protected && d.reason ? '<div class="note bad">' + esc(d.reason) + '</div>' : '') +
+          '<div class="usb-actions">' + action + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
     return '<div class="lab-section">' + sectionHead('down', '存储使用', (c.storage || []).length + ' 个卷') + (df || '<div class="empty">无数据</div>') + '</div>' +
+      '<div class="lab-section">' + sectionHead('plug', '块设备', '全部磁盘与分区，含系统运行盘') +
+      '<div class="row-actions"><button type="button" class="btn mini ghost" data-act="storage-refresh"' + (st.loading ? ' disabled' : '') + '>刷新识别</button></div>' +
+      devices + '</div>' +
       '<div class="lab-section"><div class="subblock-title">挂载点</div>' + (mounts || '<div class="empty">无挂载信息</div>') + '</div>';
   }
 
@@ -2866,29 +2923,19 @@
       return;
     }
 
-    if (act === 'install-env') { await ensurePkgEnv(true); return; }
-    if (act === 'install-mode') {
-      state.install.mode = btn.dataset.mode === 'local' ? 'local' : 'feed';
-      renderConsole();
+    if (act === 'storage-refresh') { await fetchStorage(); return; }
+    if (act === 'storage-mount') {
+      const dev = storageDeviceByPath(btn.dataset.dev);
+      if (!dev) { toast('设备已不在列表中，请刷新识别', 'info'); return; }
+      arm(btn, '挂载', () => mountStorage(dev));
       return;
     }
-    if (act === 'install-pick') { await pickLocalPackage(); return; }
-    if (act === 'install-start') { await startInstallJob(); return; }
-    if (act === 'install-cancel') {
-      try {
-        if (state.install.jobId) await state.api.CancelInstallJob(state.install.jobId);
-        toast('已请求取消', 'info');
-      } catch (e) { toastError(e); }
+    if (act === 'storage-unmount') {
+      const dev = storageDeviceByPath(btn.dataset.dev);
+      if (!dev) { toast('设备已不在列表中，请刷新识别', 'info'); return; }
+      arm(btn, '卸载', () => unmountStorage(dev));
       return;
     }
-    if (act === 'install-reset') {
-      state.install.job = null;
-      state.install.jobId = '';
-      state.install.starting = false;
-      renderConsole();
-      return;
-    }
-
     if (act === 'market-refresh') { await loadPluginMarket(true); return; }
     if (act === 'market-plugin') {
       state.market.pluginId = btn.dataset.id || '';
@@ -3319,7 +3366,9 @@
     $('#mainView').classList.add('hidden');
     $('#connectView').classList.remove('hidden');
     $('#connDot').className = 'status-dot off';
+    state.linkDown = true;
     showConnectError(message || '');
+    updateReconnectUI();
     $('#resetFpBtn').classList.toggle('hidden', !(state.cfg && (state.cfg.fingerprint || '').length));
   }
 
@@ -3368,11 +3417,12 @@
       } catch (e) { toastError(e); }
     });
     $('#proBtn').addEventListener('click', () => state.labOpen ? closeLab() : openLab());
-    $('#labBar').addEventListener('click', () => openLab(null, 'console'));
+    const reconnectMainBtn = $('#reconnectBtn');
+    if (reconnectMainBtn) reconnectMainBtn.addEventListener('click', () => reconnectLast());
+    const reconnectConnectBtn = $('#connectReconnectBtn');
+    if (reconnectConnectBtn) reconnectConnectBtn.addEventListener('click', () => reconnectLast());
     $('#labBack').addEventListener('click', closeLab);
     $('#labRefreshBtn').addEventListener('click', () => refreshLab());
-    const installTabBtn = $('#labInstallTab');
-    if (installTabBtn) installTabBtn.addEventListener('click', () => openInstallPage());
     $$('.lab-tabs button[data-labtab]').forEach((b) => b.addEventListener('click', () => {
       if (state.labTab === b.dataset.labtab) return;
       state.labTab = b.dataset.labtab;
@@ -3381,7 +3431,6 @@
       else if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); }
       else fetchConsole();
     }));
-    $('#consoleLink').addEventListener('click', () => openLab(null, 'console'));
     const offlineMarketBtn = $('#offlineMarketBtn');
     if (offlineMarketBtn) offlineMarketBtn.addEventListener('click', () => openLab(null, 'market'));
     $('#pluginChips').addEventListener('click', () => { state.cTab = 'plugins'; openLab(null, 'console'); });
@@ -3529,10 +3578,6 @@
         state.market.search = e.target.value;
         state.market.page = 0;
         updateMarketList();
-        return;
-      }
-      if (e.target.id === 'installPkg') {
-        state.install.pkg = e.target.value;
         return;
       }
       if (e.target.id !== 'pkgFilter') return;

@@ -23,12 +23,46 @@ func buildTiles(s *Snapshot, m *Meta) []Tile {
 		optional = append(optional, Tile{Key: "wifi", Title: "Wi-Fi", Status: status, Subtitle: sub, Tone: "blue", Active: m.Wireless.Enabled, Action: "section:network"})
 	}
 	if m.Caps.Cellular {
-		status := "LTE"
-		sub := fmt.Sprintf("%d 个模组", m.Modem.Count)
-		if m.Modem.Internet {
-			sub += " · 已联网"
+		tile := Tile{Key: "cellular", Title: "蜂窝网络", Action: "section:network"}
+		if !m.Modem.Present {
+			tile.Status = "无模组"
+			tile.Subtitle = "未检测到模组"
+			tile.Tone = "muted"
+		} else {
+			mode := m.Modem.Mode
+			if mode == "" {
+				mode = "蜂窝"
+			}
+			tile.Status = mode
+			if m.Modem.Operator != "" {
+				tile.Subtitle = m.Modem.Operator
+			} else {
+				tile.Subtitle = "已注册网络"
+			}
+			parts := []string{}
+			if m.Modem.Connected {
+				parts = append(parts, "已连接")
+				tile.Tone = "green"
+			} else {
+				parts = append(parts, "未连接")
+				tile.Tone = "amber"
+			}
+			if m.Modem.Interface != "" {
+				parts = append(parts, m.Modem.Interface)
+			}
+			if m.Modem.RSRP != 0 {
+				parts = append(parts, fmt.Sprintf("RSRP %d dBm", m.Modem.RSRP))
+			}
+			if m.Modem.SINR != 0 {
+				parts = append(parts, fmt.Sprintf("SINR %d dB", m.Modem.SINR))
+			}
+			if len(parts) == 1 {
+				parts = append(parts, "无信号数据")
+			}
+			tile.Detail = strings.Join(parts, " · ")
+			tile.Active = m.Modem.Connected
 		}
-		optional = append(optional, Tile{Key: "cellular", Title: "4G 模组", Status: status, Subtitle: sub, Tone: "green", Active: m.Modem.Internet, Action: "section:network"})
+		optional = append(optional, tile)
 	}
 	if m.Caps.SQM {
 		on := m.Running["sqm"]

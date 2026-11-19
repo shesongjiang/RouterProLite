@@ -63,6 +63,9 @@
     <header class="dragbar" style="--wails-draggable:drag">
       <span class="brand-strip">PRO&nbsp;·&nbsp;LITE</span>
       <div class="win-actions" style="--wails-draggable:no-drag">
+        <button type="button" class="reconnect-btn hidden" id="connectReconnectBtn" title="重新连接上次的设备">
+          <svg class="i"><use href="#i-refresh"/></svg>重新连接
+        </button>
         <button type="button" class="icon-btn" id="connectThemeBtn" title="切换主题">
           <svg class="i"><use href="#i-moon"/></svg>
         </button>
@@ -179,10 +182,15 @@
         <span class="link-badge mono" id="linkBadge">--</span>
       </div>
       <div class="top-actions" style="--wails-draggable:no-drag">
+        <button type="button" class="reconnect-btn hidden" id="reconnectBtn" title="重新连接上次的设备">
+          <svg class="i"><use href="#i-refresh"/></svg>重新连接
+        </button>
+        <button type="button" class="console-btn" id="proBtn" title="打开控制中心 (Ctrl+K)">
+          <svg class="i"><use href="#i-gauge"/></svg>控制中心
+        </button>
         <button type="button" class="icon-btn" id="themeBtn" title="切换主题">
           <svg class="i"><use href="#i-moon"/></svg>
         </button>
-        <button type="button" class="pro-btn" id="proBtn" title="高级实验室 (Ctrl+K)">Pro<kbd>Ctrl K</kbd></button>
         <button type="button" class="icon-btn" id="pinBtn" title="窗口置顶">
           <svg class="i"><use href="#i-pin"/></svg>
         </button>
@@ -246,7 +254,6 @@
         <header class="card-head">
           <span class="card-title">设备与插件</span>
           <span class="grow"></span>
-          <button type="button" class="link-btn" id="consoleLink">控制中心 →</button>
         </header>
         <div id="devSummary" class="dev-summary"></div>
         <div id="pluginChips" class="plugin-chips"></div>
@@ -266,11 +273,6 @@
 
       <div class="conn-banner hidden" id="connBanner"></div>
     </main>
-
-    <button type="button" class="lab-bar" id="labBar">
-      <span class="lab-bar-text">控制中心 · 系统/接口/插件 · 配置与日志 · 工具</span>
-      <span class="lab-bar-arrow">→</span>
-    </button>
   </section>
 
   <!-- ============ Lab ============ -->
@@ -280,7 +282,7 @@
         <svg class="i"><use href="#i-back"/></svg>
       </button>
       <div class="lab-title">
-        <span>Advanced Lab</span>
+        <span>控制中心</span>
         <span class="crumb mono" id="labCrumb">—</span>
       </div>
       <div class="top-actions" style="--wails-draggable:no-drag">
@@ -293,10 +295,15 @@
       </div>
     </header>
     <div class="lab-tabs">
-      <button type="button" data-labtab="console" class="active">控制台</button>
-      <button type="button" data-labtab="market" class="lab-tab-market" title="浏览并安装插件">插件市场</button>
-      <button type="button" data-labtab="tools">工具</button>
-      <button type="button" class="lab-tab-install" id="labInstallTab" title="安装包预演">安装包</button>
+      <button type="button" data-labtab="console" class="active">
+        <svg class="i"><use href="#i-terminal"/></svg>控制台
+      </button>
+      <button type="button" data-labtab="market" title="浏览并安装插件">
+        <svg class="i"><use href="#i-plug"/></svg>插件市场
+      </button>
+      <button type="button" data-labtab="tools">
+        <svg class="i"><use href="#i-bolt"/></svg>工具
+      </button>
     </div>
     <div class="lab-scroll" id="labScroll">
       <div id="labContent"></div>

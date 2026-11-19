@@ -374,7 +374,7 @@ func buildPorts(meta *Meta, wan, wan6 *WANInfo, rates *Rates, clients []Client, 
 		Detail: wifiDetail,
 	})
 
-	if meta.Caps.Cellular {
+	if meta.Caps.Cellular && meta.Modem.Present {
 		cellUp := meta.Modem.Present && meta.Modem.Internet
 		cellState := "DOWN"
 		if cellUp {

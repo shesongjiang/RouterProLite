@@ -21,6 +21,8 @@ type App struct {
 
 	jobsMu sync.Mutex
 	jobs   map[string]*InstallJob
+
+	storageMu sync.Mutex
 }
 
 func NewApp() *App {

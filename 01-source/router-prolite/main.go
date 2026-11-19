@@ -59,6 +59,7 @@ func main() {
 		Bind:             []interface{}{app},
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
 			DisableWindowIcon:    true,
 		},
 	})
