@@ -34,6 +34,9 @@ func buildTiles(s *Snapshot, m *Meta) []Tile {
 				mode = "蜂窝"
 			}
 			tile.Status = mode
+			if m.Modem.SIMStatus != "" && noSIM(m.Modem.SIMStatus) {
+				tile.Status = "未插卡"
+			}
 			switch {
 			case m.Modem.SIMStatus != "" && noSIM(m.Modem.SIMStatus):
 				tile.Subtitle = "未插 SIM 卡"

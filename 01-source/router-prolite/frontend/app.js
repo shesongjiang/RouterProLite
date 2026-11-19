@@ -41,6 +41,9 @@
     logLoading: false,
     accOpen: new Set(['pf', 'probe']),
     pfFormOpen: false,
+    pfDraft: { name: '', proto: 'tcp', ext: '', destPort: '', destIP: '' },
+    dnsDraft: null,
+    opMsgs: {},
     probeTarget: '1.1.1.1',
     probeBusy: false,
     probeOut: null,
@@ -69,11 +72,14 @@
       indexErr: '',
       loading: false,
       checks: [],
+      repoOpen: false,
+      curatedOpen: false,
       search: '',
-      onlyNew: true,
+      cat: '',
+      onlyNew: false,
       sort: 'name',
       page: 0,
-      pageSize: 50,
+      pageSize: 10,
       selected: null,
       plan: null,
       planLoading: false,
@@ -141,7 +147,7 @@
     n = Number(n) || 0;
     if (!n) return '—';
     if (n >= 1073741824) return (n / 1073741824).toFixed(1) + ' GB';
-    if (n >= 1048576) return (n / 1048576).toFixed(0) + ' MB';
+    if (n >= 1048576) return (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
     if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
     return n + ' B';
   }
@@ -317,7 +323,7 @@
 
     function tiles() {
       const out = [];
-      out.push({ key: 'cellular', title: '蜂窝网络', status: '无模组', subtitle: '未检测到模组', tone: 'muted', active: false, toggleable: false, on: false, action: 'cell:detail' });
+      out.push({ key: 'cellular', title: '蜂窝网络', status: '4G', subtitle: 'CHINA MOBILE', tone: 'green', active: true, toggleable: false, on: true, action: 'cell:detail', detail: '已连接 · usb0 · RSRP -78 dBm' });
       if (sqmOn !== null) out.push({ key: 'sqm', title: 'SQM QoS', status: sqmOn ? 'CAKE' : 'OFF', subtitle: '抗缓冲膨胀 · 低抖动', tone: 'green', active: sqmOn, toggleable: true, on: sqmOn, action: 'toggle:sqm' });
       out.push({ key: 'adguard', title: 'AdGuard DNS', status: adOn ? 'ON' : 'OFF', subtitle: 'DNS 过滤 · 去广告', tone: 'blue', active: adOn, toggleable: true, on: adOn, action: 'toggle:AdGuardHome' });
       out.push({ key: 'proxy', title: 'Smart Proxy', status: proxyOn ? 'ON' : 'OFF', subtitle: '透明代理 · 分流规则', tone: 'blue', active: proxyOn, toggleable: true, on: proxyOn, action: 'toggle:passwall' });
@@ -335,7 +341,7 @@
         { key: 'wan', label: 'WAN', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'pppoe · wan', speed: wanUp ? '1000M FULL' : '' },
         { key: 'wan6', label: 'WAN6', up: wanUp, state: wanUp ? 'UP' : 'DOWN', detail: 'IPv6 · wan6' },
         { key: 'lan', label: 'LAN', up: true, state: 'UP', detail: 'br-lan · ' + online + ' 台在线', speed: '1000M FULL', clients: online },
-        { key: 'cell', label: '4G/5G', up: false, state: '无模组', detail: '未检测到模组' },
+        { key: 'cell', label: '4G/5G', up: true, state: 'UP', detail: 'CHINA MOBILE · usb0' },
       ];
     }
 
@@ -367,7 +373,7 @@
           memPct: 29 + wave * 2, memUsed: 154 * 1048576, memTotal: 512 * 1048576,
           load1: 0.42 + wave * 0.2, load5: 0.36, load15: 0.31, processCount: 118,
           tempC: 43 + wave * 3, tempAvailable: true,
-          flashFree: 2048, flashTotal: 128 * 1048576,
+          flashFree: 1928 * 1024, flashTotal: 2240 * 1024,
         },
         wan: {
           up: wanUp, status: wanUp ? 'UP' : 'DOWN', proto: 'pppoe', device: 'wan',
@@ -396,7 +402,12 @@
         },
         fullcone,
         services: services.map((s) => ({ ...s, running: s.key === 'sqm' ? sqmOn : s.key === 'AdGuardHome' ? adOn : s.running })),
-        cellular: { present: false, internet: false, count: 0, raw: '', devices: [] },
+        cellular: {
+          present: true, installed: true, internet: true, connected: true, count: 1,
+          mode: '4G', operator: 'CHINA MOBILE', model: 'RM500U-CNV', simStatus: 'READY',
+          band: 'B3', rsrp: -78, sinr: 12, interface: 'usb0', ipv4: '192.168.4.170/24',
+          gateway: '192.168.4.1', uptime: 7200, raw: '', devices: ['usb0'],
+        },
         mwan: { installed: false, running: false, interfaces: [] },
         blocked: blocked.map((m) => ({ mac: m, section: 'rule_' + m })),
         wireless: { present: true, enabled: wifiOn, ssid: 'ProLite-5G', channel: '149', radios: ['radio0'] },
@@ -625,6 +636,49 @@
           policy: { configured: true, matches: true, host: cfg.host, path: 'C:\\Users\\you\\AppData\\Roaming\\ProLite\\device-write-allow.json', error: '' },
           note: '',
         };
+      },
+      GetMarketIndex: async () => {
+        await sleep(180);
+        const defs = [
+          ['luci-app-argon-config', 'Argon 主题配置', 'LuCI'],
+          ['luci-app-attendedsysupgrade', '在线升级助手', '系统'],
+          ['luci-app-ddns', '动态域名解析', '网络'],
+          ['luci-app-firewall', '防火墙规则', '网络'],
+          ['luci-app-sqm', '智能队列限速', '网络'],
+          ['luci-app-mwan3', '多 WAN 负载均衡', '网络'],
+          ['luci-app-openclash', 'OpenClash 代理', '服务'],
+          ['luci-app-passwall', 'PassWall 代理', '服务'],
+          ['luci-app-adguardhome', 'AdGuard Home 去广告', '服务'],
+          ['luci-app-upnp', 'UPnP 端口映射', '网络'],
+          ['luci-app-wol', '网络唤醒', '工具'],
+          ['luci-app-nlbwmon', '带宽监控', '网络'],
+          ['luci-app-statistics', '系统统计图表', '系统'],
+          ['luci-app-ttyd', '网页终端', '工具'],
+          ['luci-app-filetransfer', '文件传输', '工具'],
+          ['luci-app-vnstat2', '流量统计', '网络'],
+          ['luci-app-wifischedule', '无线定时开关', '无线'],
+          ['luci-app-cpufreq', 'CPU 调频', '系统'],
+          ['luci-app-temp-status', '温度状态', '系统'],
+          ['luci-app-zerotier', 'ZeroTier 组网', '服务'],
+          ['luci-app-wireguard', 'WireGuard VPN', '服务'],
+          ['luci-app-https-dns-proxy', 'DoH 加密 DNS', '网络'],
+          ['luci-app-minidlna', 'DLNA 媒体共享', '服务'],
+          ['luci-app-samba4', 'Samba 文件共享', '服务'],
+          ['luci-app-dockerman', 'Docker 管理', '服务'],
+          ['luci-app-ksmbd', 'KSMBD 文件共享', '服务'],
+          ['luci-app-netdata', 'Netdata 监控', '系统'],
+          ['luci-app-crowdsec', 'CrowdSec 防护', '安全'],
+        ];
+        const packages = defs.map((d, i) => ({
+          name: d[0],
+          version: '1.' + (i % 9) + '.' + (i % 5) + '-r1',
+          size: 24000 + (i * 7919) % 480000,
+          installed: i % 5 === 0,
+          description: d[1],
+          section: d[2],
+          origin: 'feeds',
+        }));
+        return { connected: true, packages, total: packages.length, sources: [{ url: 'device:feeds', count: packages.length }], elapsedMs: 142 };
       },
       StartInstallJob: async (req) => {
         await sleep(220);
@@ -1140,6 +1194,7 @@
       const foot = t.toggleable
         ? (t.on ? 'ON · 点击停用' : 'OFF · 点击启用')
         : t.action === 'clients' ? '管理终端 →'
+        : t.action === 'cell:detail' ? '蜂窝详情 →'
         : t.action === 'section:portforward' ? '端口映射 →'
         : '链路详情 →';
       return '<button type="button" class="tile' + (t.active ? ' active' : '') +
@@ -1411,7 +1466,7 @@
     view.classList.add('open');
     view.setAttribute('aria-hidden', 'false');
     renderLab();
-    if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); return; }
+    if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); ensureMarketIndex(); return; }
     if (state.labTab === 'tools') await fetchLab();
     else await fetchConsole();
     if (focus) scrollLab(focus);
@@ -1504,6 +1559,16 @@
     }
   }
 
+  function simLabel(s) {
+    const u = String(s || '').trim().toUpperCase();
+    if (!u) return '—';
+    if (/ABSENT|NOT INSERTED|NO SIM|MISS/.test(u)) return '未插卡';
+    if (/ERROR|FAIL/.test(u)) return '卡异常';
+    if (/PIN|LOCK/.test(u)) return '已锁定';
+    if (/READY|OK|NORMAL/.test(u)) return '正常';
+    return s;
+  }
+
   function cellStat(label, value, tone) {
     return '<div class="cell-stat' + (tone ? ' ' + tone : '') + '"><span>' + esc(label) + '</span><b>' +
       esc(value == null || value === '' ? '—' : value) + '</b></div>';
@@ -1537,14 +1602,15 @@
       return;
     }
 
-    const noSim = /ABSENT|NOT INSERTED|NO SIM/i.test(m.simStatus || '');
+    const noSim = /ABSENT|NOT INSERTED|NO SIM|MISS|ERROR|FAIL/i.test(m.simStatus || '');
     const statusText = !present ? '未检测到模组' : (noSim ? '未插 SIM 卡' : (connected ? '已连接' : '未连接'));
-    const mode = m.mode || (present ? '蜂窝' : '—');
+    const mode = m.mode || '—';
     const sub = [m.model, m.interface].filter(Boolean).join(' · ');
     const rsrp = m.rsrp ? m.rsrp + ' dBm' : '—';
     const sinr = m.sinr ? m.sinr + ' dB' : '—';
     const rsrpTone = m.rsrp && m.rsrp <= -110 ? 'bad' : (m.rsrp && m.rsrp <= -95 ? 'warn' : '');
-    const simText = m.simStatus ? (noSim ? '未插卡' : m.simStatus) : '—';
+    const simText = simLabel(m.simStatus);
+    const operatorText = m.operator || (connected ? '已注册网络' : (noSim ? '未插卡，未注册' : '未注册网络'));
     const uptime = m.uptime ? shortDur(m.uptime) : '—';
     const raw = m.raw || '';
 
@@ -1552,12 +1618,12 @@
       '<div class="cell-hero">' +
         '<div class="cell-mode">' + esc(mode) + '</div>' +
         '<span class="status-pill ' + (connected ? 'on' : '') + '">' + esc(statusText) + '</span>' +
-        '<div class="cell-operator">' + esc(m.operator || (present ? '已注册网络' : '未检测到模组')) + '</div>' +
+        '<div class="cell-operator">' + esc(present ? operatorText : '未检测到模组') + '</div>' +
         (sub ? '<div class="cell-sub mono">' + esc(sub) + '</div>' : '') +
       '</div>' +
       '<div class="cell-grid">' +
         cellStat('制式', mode) +
-        cellStat('运营商', m.operator || '—') +
+        cellStat('运营商', operatorText) +
         cellStat('SIM 状态', simText, noSim ? 'bad' : '') +
         cellStat('信号 RSRP', rsrp, rsrpTone) +
         cellStat('信号 SINR', sinr) +
@@ -1616,7 +1682,7 @@
 
   function scrollLab(id) {
     const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
   function accOpen(id) {
@@ -1793,10 +1859,12 @@
 
     if (job.result) {
       const ok = !!job.result.success;
-      const okTitle = job.dryRun ? 'dry-run 通过' : '安装完成';
-      h += '<div class="inst-result ' + (ok ? 'ok' : 'bad') + '">' +
-        '<b>' + (ok ? okTitle : (job.result.code || '失败')) + '</b>' +
-        '<span>' + esc(job.result.message || '') + '</span></div>';
+      const title = ok ? (job.dryRun ? '预检通过' : '安装完成') : (job.dryRun ? '预检未通过' : '安装未完成');
+      const human = ok
+        ? (job.dryRun ? '依赖、空间和包完整性检查都通过，可以安装。' : '插件已安装，服务状态已回读。')
+        : humanJobError(job);
+      h += '<div class="inst-result ' + (ok ? 'ok' : 'bad') + '"><b>' + esc(title) + '</b><span>' + esc(human) + '</span></div>';
+      h += '<details class="op-detail"><summary>安装详情（依赖、预检、回读、日志）</summary>';
       if (job.result.installed && job.result.installed.length) {
         h += '<div class="note">已装：' + job.result.installed.map(esc).join('、') + '</div>';
       }
@@ -1849,8 +1917,21 @@
       const lines = job.log.slice(-120).join('\n');
       h += '<div class="inst-title">执行日志</div><pre class="term">' + esc(lines) + '</pre>';
     }
+    if (job.result) h += '</details>';
     h += '</div>';
     return h;
+  }
+
+  function humanJobError(job) {
+    const r = job.result || {};
+    const code = String(r.code || '');
+    if (/overlay|space|disk/.test(code)) return '设备可写空间不足，先清理空间再安装。';
+    if (/depend|missing/.test(code)) return '缺少依赖，刷新索引或换一个版本再试。';
+    if (/arch/.test(code)) return '包架构和设备不匹配。';
+    if (/download|network|timeout/.test(code)) return '下载失败，检查设备和包源的网络。';
+    if (/verify|checksum|signature/.test(code)) return '包完整性校验没通过，已停止安装。';
+    const msg = String(r.message || '').trim();
+    return msg && msg.length <= 80 ? msg : '操作没有完成，展开详情查看具体原因。';
   }
 
   /* ================= 插件市场 ================= */
@@ -1901,11 +1982,36 @@
     if (state.labTab === 'market') renderMarket();
   }
 
+  function marketCatOf(p) {
+    const sec = String(p.section || '').trim();
+    if (sec) return sec;
+    const n = String(p.name || '').toLowerCase();
+    if (n.indexOf('luci-app-') === 0) return 'LuCI 应用';
+    if (n.indexOf('luci-i18n-') === 0) return 'LuCI 语言包';
+    if (n.indexOf('luci-') === 0) return 'LuCI 组件';
+    if (n.indexOf('kmod-') === 0) return '内核模块';
+    if (n.indexOf('lib') === 0) return '库';
+    if (n.indexOf('python3-') === 0) return 'Python';
+    if (n.indexOf('perl-') === 0) return 'Perl';
+    if (n.indexOf('php') === 0) return 'PHP';
+    if (n.indexOf('node-') === 0) return 'Node';
+    if (n.indexOf('golang-') === 0) return 'Go';
+    if (n.indexOf('qmodem') === 0) return '蜂窝模组';
+    return String(p.origin || '其他').trim() || '其他';
+  }
+
+  function marketCats() {
+    const set = new Set();
+    ((state.market.index && state.market.index.packages) || []).forEach((p) => set.add(marketCatOf(p)));
+    return Array.from(set).sort();
+  }
+
   function marketFiltered() {
     const mk = state.market;
     const q = String(mk.search || '').trim().toLowerCase();
     let list = ((mk.index && mk.index.packages) || []).slice();
     if (mk.onlyNew) list = list.filter((p) => !p.installed);
+    if (mk.cat) list = list.filter((p) => marketCatOf(p) === mk.cat);
     if (q) {
       list = list.filter((p) => {
         const zh = marketZhFor(p.name);
@@ -1936,12 +2042,13 @@
       const desc = zh ? (zh.d + ' · ' + zh.u) : (p.description || '索引未提供说明');
       const untrans = zh ? '' : '<span class="mk-untrans">未翻译</span>';
       const sel = mk.selected && mk.selected.name === p.name && mk.selected.version === p.version ? ' selected' : '';
-      return '<button type="button" class="mk-row' + sel + '" data-act="market-select" data-name="' + esc(p.name) + '" data-ver="' + esc(p.version) + '">' +
-        '<span class="mk-name mono">' + esc(p.name) + '</span>' +
-        (p.installed ? '<span class="mk-badge on">已安装</span>' : '<span class="mk-badge">未安装</span>') +
-        '<span class="mk-ver mono">' + esc(p.version) + '</span>' +
-        '<span class="mk-size mono">' + fmtBytes(p.size) + '</span>' +
-        '<span class="mk-desc">' + esc(clipText(desc, 110)) + ' ' + untrans + '</span>' +
+      return '<button type="button" class="mk-card' + sel + '" data-act="market-select" data-name="' + esc(p.name) + '" data-ver="' + esc(p.version) + '">' +
+        '<span class="mk-card-head"><b class="mono">' + esc(p.name) + '</b>' +
+          (p.installed ? '<span class="mk-badge on">已安装</span>' : '<span class="mk-badge">未安装</span>') + '</span>' +
+        '<span class="mk-card-desc">' + esc(clipText(desc, 90)) + ' ' + untrans + '</span>' +
+        '<span class="mk-card-foot"><span class="mono">' + esc(p.version) + '</span>' +
+          '<span class="mono">' + fmtBytes(p.size) + '</span>' +
+          '<span class="tag">' + esc(marketCatOf(p)) + '</span></span>' +
         '</button>';
     }).join('');
     const pager = '<div class="mk-pager"><span class="mono">共 ' + list.length + ' 个 · 第 ' + (page + 1) + '/' + pages + ' 页</span>' +
@@ -1951,7 +2058,7 @@
       '<button type="button" class="btn mini ghost" data-act="market-page" data-page="' + (page + 1) + '"' + (page >= pages - 1 ? ' disabled' : '') + '>下一页</button>' +
       '<button type="button" class="btn mini ghost" data-act="market-page" data-page="' + (pages - 1) + '"' + (page >= pages - 1 ? ' disabled' : '') + '>末页</button>' +
       '</div>';
-    return '<div class="mk-list">' + (rows || '<div class="empty">没有匹配的包，试试清除搜索或取消“只看未安装”。</div>') + '</div>' + pager;
+    return '<div class="mk-cards">' + (rows || '<div class="empty">没有匹配的包，试试清除搜索或取消“只看未安装”。</div>') + '</div>' + pager;
   }
 
   function updateMarketList() {
@@ -2090,9 +2197,7 @@
     const scroll = $('#labScroll');
     const top = scroll ? scroll.scrollTop : 0;
 
-    let h = marketCuratedHtml();
-    h += '<details class="mk-advanced"><summary>高级：浏览全部包 / 自定义仓库</summary><div class="mk-advanced-body">';
-    h += sectionHead('plug', '全部包浏览', '仓库 → 索引 → 选择 → 预检 → 预演');
+    let h = sectionHead('plug', '插件市场', '设备源全部插件 · 每页 10 个');
     if (!state.connected) {
       h += '<div class="note bad">未连接设备：无法读取默认仓库，也无法做依赖预检；可手动填写仓库并浏览索引。</div>';
     }
@@ -2106,6 +2211,40 @@
     }
     if (mk.envErr) h += '<div class="note">' + esc(mk.envErr) + '</div>';
 
+    if (mk.indexErr) h += '<div class="note bad">' + esc(mk.indexErr) + '</div>';
+    if (mk.loading && !mk.index) {
+      h += '<div class="empty">正在从设备源读取插件索引…</div>';
+    }
+
+    if (mk.index) {
+      const installed = (mk.index.packages || []).filter((p) => p.installed).length;
+      h += '<div class="inst-env">' +
+        instChip('全部插件', String(mk.index.total || 0), 'ok') +
+        instChip('已安装', String(installed), 'ok') +
+        instChip('仓库数', String((mk.index.sources || []).length), 'ok') +
+        instChip('用时', String(mk.index.elapsedMs || 0) + ' ms', 'ok') +
+        '</div>';
+      h += '<div class="mk-filters">' +
+        '<input id="mkSearch" class="input" placeholder="搜索包名 / 中文说明" spellcheck="false" value="' + esc(mk.search) + '">' +
+        '<select id="mkCat" class="input mk-sort">' +
+          '<option value="">全部类别</option>' +
+          marketCats().map((c) => '<option value="' + esc(c) + '"' + (mk.cat === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') +
+        '</select>' +
+        '<label class="mk-check"><input type="checkbox" id="mkOnlyNew"' + (mk.onlyNew ? ' checked' : '') + '> 只看未安装</label>' +
+        '<select id="mkSort" class="input mk-sort">' +
+          '<option value="name"' + (mk.sort === 'name' ? ' selected' : '') + '>按名称</option>' +
+          '<option value="size"' + (mk.sort === 'size' ? ' selected' : '') + '>按体积（大到小）</option>' +
+        '</select>' +
+        '<button type="button" class="btn mini ghost" data-act="market-fetch"' + (mk.loading ? ' disabled' : '') + '>' + (mk.loading ? '刷新中…' : '刷新') + '</button>' +
+        '</div>';
+      h += '<div id="mkListWrap">' + marketListHtml() + '</div>';
+      h += marketDetailHtml();
+      h += marketPlanHtml();
+    } else if (!mk.loading) {
+      h += '<div class="empty">还没有读取到插件索引。可在下方“高级”里检查设备源或手动填写仓库。</div>';
+    }
+
+    h += '<details class="mk-advanced" data-mkdetail="repo"' + (mk.repoOpen ? ' open' : '') + '><summary>高级：自定义仓库 / 索引诊断</summary><div class="mk-advanced-body">';
     h += '<div class="mk-repo-box">' +
       '<div class="mk-label">仓库地址（每行一个；支持 apk 的 APKINDEX.tar.gz 与 opkg 的 Packages.gz）</div>' +
       '<textarea id="mkRepos" class="mk-repos" spellcheck="false" placeholder="https://downloads.immortalwrt.org/releases/.../packages/x86_64/luci">' + esc(mk.reposText) + '</textarea>' +
@@ -2115,37 +2254,16 @@
         '<button type="button" class="btn mini primary" data-act="market-fetch"' + (mk.loading ? ' disabled' : '') + '>' + (mk.loading ? '正在拉取索引…' : '测试连通性 / 拉取索引') + '</button>' +
       '</div>' +
     '</div>';
-
-    if (mk.indexErr) h += '<div class="note bad">' + esc(mk.indexErr) + '</div>';
     if (mk.checks && mk.checks.length) {
       h += '<div class="mk-checks">' + mk.checks.map((c) =>
         '<div class="inst-check ' + esc(c.level || '') + '"><span class="tag">' + esc(c.stage || '') + '</span>' +
         '<b>' + esc(c.label || c.id) + '</b><em>' + esc(c.detail || '') + '</em></div>').join('') + '</div>';
     }
-
-    if (mk.index) {
-      h += '<div class="inst-env">' +
-        instChip('索引包数', String(mk.index.total || 0), 'ok') +
-        instChip('仓库数', String((mk.index.sources || []).length), 'ok') +
-        instChip('用时', String(mk.index.elapsedMs || 0) + ' ms', 'ok') +
-        instChip('设备状态', mk.index.connected ? '已连接' : '离线', mk.index.connected ? 'ok' : 'warn') +
-        '</div>';
-      h += '<div class="mk-filters">' +
-        '<input id="mkSearch" class="input" placeholder="搜索包名 / 中文说明" spellcheck="false" value="' + esc(mk.search) + '">' +
-        '<label class="mk-check"><input type="checkbox" id="mkOnlyNew"' + (mk.onlyNew ? ' checked' : '') + '> 只看未安装</label>' +
-        '<select id="mkSort" class="input mk-sort">' +
-          '<option value="name"' + (mk.sort === 'name' ? ' selected' : '') + '>按名称</option>' +
-          '<option value="size"' + (mk.sort === 'size' ? ' selected' : '') + '>按体积（大到小）</option>' +
-        '</select>' +
-        '</div>';
-      h += '<div id="mkListWrap">' + marketListHtml() + '</div>';
-      h += marketDetailHtml();
-      h += marketPlanHtml();
-    } else {
-      h += '<div class="empty">填写仓库地址后点击“测试连通性 / 拉取索引”。索引在桌面端下载，不会让设备联网。</div>';
-    }
-
     h += '</div></details>';
+
+    h += '<details class="mk-advanced" data-mkdetail="curated"' + (mk.curatedOpen ? ' open' : '') + '><summary>精选插件（一键安装）</summary><div class="mk-advanced-body">' +
+      marketCuratedHtml() + '</div></details>';
+
     if (mk.job) h += installJobHtml(mk.job);
     if (mk.job) h += marketConfirmHtml();
     host.innerHTML = h;
@@ -2324,10 +2442,17 @@
     renderMarket();
   }
 
+  function ensureMarketIndex() {
+    const mk = state.market;
+    if (!state.connected || mk.index || mk.loading) return;
+    if (!state.api || !state.api.GetMarketIndex) return;
+    fetchMarketIndex();
+  }
+
   async function fetchMarketIndex() {
     const mk = state.market;
     const repos = marketRepoLines();
-    if (!repos.length) { toast('请填写至少一个仓库地址', 'error'); return; }
+    if (!repos.length && !state.connected) { toast('请填写至少一个仓库地址', 'error'); return; }
     if (!state.connected && !state.api) { toast('运行时不可用', 'error'); return; }
     if (!state.api || !state.api.GetMarketIndex) { toast('运行时缺少 GetMarketIndex，请使用最新 exe', 'error'); return; }
     mk.loading = true;
@@ -2839,9 +2964,59 @@
       '<div class="lab-section"><div class="subblock-title">挂载点</div>' + (mounts || '<div class="empty">无挂载信息</div>') + '</div>';
   }
 
+  function setOpMsg(key, tone, text, detail) {
+    state.opMsgs[key] = { tone: tone || 'ok', text: text || '', detail: detail || '' };
+  }
+
+  function opMsgHtml(key) {
+    const m = state.opMsgs[key];
+    if (!m) return '';
+    return '<div class="op-result ' + esc(m.tone) + '">' + esc(m.text) + '</div>' +
+      (m.detail ? '<details class="op-detail"><summary>详情</summary><pre class="term">' + esc(m.detail) + '</pre></details>' : '');
+  }
+
+  function humanErrText(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '操作没有完成，请重试。';
+    if (/需要重新输入密码|凭据已失效/.test(s)) return '登录凭据已失效，请重新输入密码。';
+    if (/timeout|超时|timed out/i.test(s)) return '设备没有响应，请稍后再试。';
+    if (/permission denied|not permitted/i.test(s)) return '设备拒绝写入，请确认账户权限。';
+    if (/no space|空间不足/i.test(s)) return '设备存储空间不足。';
+    if (/connection refused|connection reset|no route|unreachable|connection (closed|lost)/i.test(s)) return '与设备的连接不稳定，请检查网络。';
+    if (/not found|command not found/i.test(s)) return '设备上缺少对应组件，无法执行这个操作。';
+    return s.length <= 100 ? s : '操作没有完成，展开详情查看具体原因。';
+  }
+
+  function opFail(key, e) {
+    const raw = errText(e);
+    setOpMsg(key, 'bad', humanErrText(raw), raw);
+    if (/需要重新输入密码|凭据已失效/.test(raw)) toastError(e);
+    renderLab();
+  }
+
+  function captureToolDrafts() {
+    const val = (id) => {
+      const el = document.getElementById(id);
+      return el ? el.value : null;
+    };
+    const pfExt = val('pfExt');
+    if (pfExt !== null) {
+      state.pfDraft = {
+        name: val('pfName') || '',
+        proto: val('pfProto') || 'tcp',
+        ext: pfExt,
+        destPort: val('pfDestPort') || '',
+        destIP: val('pfDestIP') || '',
+      };
+    }
+    const dns = val('dnsInput');
+    if (dns !== null) state.dnsDraft = dns;
+  }
+
   function renderTools() {
     const host = $('#labContent');
     if (!host) return;
+    captureToolDrafts();
     const scroll = $('#labScroll');
     const top = scroll ? scroll.scrollTop : 0;
     const lab = state.lab;
@@ -2872,19 +3047,24 @@
         '</div></div>';
     }).join('');
 
+    const pfD = state.pfDraft || {};
+    const pfProto = pfD.proto || 'tcp';
     const pfForm = state.pfFormOpen ? (
       '<div class="form-grid">' +
-      '<div class="field"><label>名称</label><input id="pfName" placeholder="NAS 管理" spellcheck="false"></div>' +
-      '<div class="field"><label>协议</label><select id="pfProto"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp udp">TCP + UDP</option></select></div>' +
-      '<div class="field"><label>外部端口</label><input id="pfExt" inputmode="numeric" placeholder="8443" spellcheck="false"></div>' +
-      '<div class="field"><label>内网端口</label><input id="pfDestPort" inputmode="numeric" placeholder="443" spellcheck="false"></div>' +
-      '<div class="field full"><label>内网 IP</label><input id="pfDestIP" placeholder="192.168.1.10" spellcheck="false" value="' + esc(defaultDestIP()) + '"></div>' +
+      '<div class="field"><label>名称</label><input id="pfName" placeholder="NAS 管理" spellcheck="false" value="' + esc(pfD.name || '') + '"></div>' +
+      '<div class="field"><label>协议</label><select id="pfProto">' +
+      '<option value="tcp"' + (pfProto === 'tcp' ? ' selected' : '') + '>TCP</option>' +
+      '<option value="udp"' + (pfProto === 'udp' ? ' selected' : '') + '>UDP</option>' +
+      '<option value="tcp udp"' + (pfProto === 'tcp udp' ? ' selected' : '') + '>TCP + UDP</option></select></div>' +
+      '<div class="field"><label>外部端口</label><input id="pfExt" inputmode="numeric" placeholder="8443" spellcheck="false" value="' + esc(pfD.ext || '') + '"></div>' +
+      '<div class="field"><label>内网端口</label><input id="pfDestPort" inputmode="numeric" placeholder="443" spellcheck="false" value="' + esc(pfD.destPort || '') + '"></div>' +
+      '<div class="field full"><label>内网 IP</label><input id="pfDestIP" placeholder="192.168.1.10" spellcheck="false" value="' + esc(pfD.destIP || defaultDestIP()) + '"></div>' +
       '</div>' +
       '<div class="form-actions"><button type="button" class="btn mini ghost" data-act="pf-cancel">取消</button>' +
       '<button type="button" class="btn mini primary" data-act="pf-add">添加规则</button></div>'
     ) : '';
 
-    parts.push(acc('pf', 'wan', 'NAT 端口转发', pfRows + pfForm +
+    parts.push(acc('pf', 'wan', 'NAT 端口转发', opMsgHtml('pf') + pfRows + pfForm +
       '<div class="row" style="margin-top:7px;justify-content:flex-end">' +
       (state.pfFormOpen ? '' : '<button type="button" class="btn mini" data-act="pf-new"><svg class="i"><use href="#i-plus"/></svg>新增映射</button>') +
       '</div>' +
@@ -2893,6 +3073,7 @@
 
     /* --- probes --- */
     const targets = ['1.1.1.1', '8.8.8.8', '192.168.100.1'];
+    const pv = probeSummary(state.probeKind, state.probeOut);
     const probeBody = '<div class="chips">' + targets.map((t) =>
       '<button type="button" class="chip' + (state.probeTarget === t ? ' active' : '') + '" data-target="' + t + '">' + t + '</button>'
     ).join('') + '</div>' +
@@ -2900,21 +3081,25 @@
       '<button type="button" class="btn mini" data-act="probe-ping"' + (state.probeBusy ? ' disabled' : '') + '>Ping</button>' +
       '<button type="button" class="btn mini" data-act="probe-trace"' + (state.probeBusy ? ' disabled' : '') + '>Trace</button></div>' +
       (state.probeBusy ? '<div class="note" style="margin-top:6px">探测运行中…</div>' : '') +
-      termBlock(state.probeOut, 'probeTerm') +
+      (pv ? '<div class="op-result ' + pv.tone + '">' + esc(pv.text) + '</div>' : '') +
+      (state.probeOut
+        ? '<details class="op-detail"><summary>原始输出</summary>' + termBlock(state.probeOut, 'probeTerm') + '</details>'
+        : termBlock(null, 'probeTerm')) +
       '<div class="term-foot"><span class="grow">ICMP ping · traceroute</span><button type="button" class="link-btn" data-act="probe-clear">清空</button></div>';
-    parts.push(acc('probe', 'search', '网络探针', probeBody, state.probeOut ? 'result' : 'idle'));
+    parts.push(acc('probe', 'search', '网络探针', probeBody, state.probeOut ? (pv ? pv.text : 'result') : 'idle'));
 
     /* --- DNS & fullcone --- */
     const servers = (lab.dns && lab.dns.servers) || [];
     const effective = (lab.dns && lab.dns.effective) || [];
-    const dnsBody = '<div class="subblock">' +
+    const dnsDraft = state.dnsDraft !== null ? state.dnsDraft : servers.join(', ');
+    const dnsBody = opMsgHtml('dns') + '<div class="subblock">' +
       '<div class="subblock-title">上游 DNS</div>' +
       ((servers.length ? servers.map((s) => '<div class="list-row"><span class="mono">' + esc(s) + '</span><span class="grow"></span><span class="status-pill on">静态</span></div>').join('') :
         '<div class="note">未显式设置，使用上游自动下发。</div>')) +
       (effective.length ? '<div class="subblock-title" style="margin-top:4px">系统解析</div>' +
         '<div class="kv">' + effective.map((s) => '<span class="mono">' + esc(s) + '</span>').join('') + '</div>' : '') +
       '</div>' +
-      '<div class="row" style="margin-top:7px"><input id="dnsInput" value="' + esc(servers.join(', ')) + '" placeholder="1.1.1.1, 8.8.8.8" spellcheck="false">' +
+      '<div class="row" style="margin-top:7px"><input id="dnsInput" value="' + esc(dnsDraft) + '" placeholder="1.1.1.1, 8.8.8.8" spellcheck="false">' +
       '<button type="button" class="btn mini" data-act="dns-save">保存</button></div>' +
       '<div class="note" style="margin-top:5px">最多 4 个地址，写入 dnsmasq server 列表并重启 DHCP。' +
       (caps.doh ? ' 已检测到 https-dns-proxy。' : ' 未检测到 DoH 代理，当前为明文上游。') + '</div>' +
@@ -2956,22 +3141,26 @@
       ).join('')
       : '<div class="empty">黑名单为空</div>';
 
-    const fwBody = '<div class="subblock-title">已拉黑设备</div>' + blockRows +
+    const fwBody = opMsgHtml('svc') + '<div class="subblock-title">已拉黑设备</div>' + blockRows +
       '<div class="subblock-title" style="margin-top:9px">服务</div>' + (svcRows || '<div class="empty">无服务信息</div>') +
       '<div class="note" style="margin-top:6px">开关仅对 sqm、AdGuard、DoH、代理与 mwan3 开放；状态来自 ubus service list。</div>';
     parts.push(acc('svc', 'terminal', '防火墙与服务', fwBody, (lab.services || []).length + ' 项'));
 
     /* --- SSH terminal --- */
+    const cv = cmdVerdict(state.cmdOut);
     const sshBody = '<div class="probe-row"><input id="sshInput" value="' + esc(state.cmdLast) + '" placeholder="uci show network" spellcheck="false">' +
       '<button type="button" class="btn mini" data-act="cmd-run">运行</button>' +
       '<button type="button" class="btn mini ghost" data-act="cmd-clear">清空</button></div>' +
-      termBlock(state.cmdOut, 'cmdTerm') +
+      (cv ? '<div class="op-result ' + cv.tone + '">' + esc(cv.text) + '</div>' : '') +
+      (state.cmdOut
+        ? '<details class="op-detail" open><summary>命令输出</summary>' + termBlock(state.cmdOut, 'cmdTerm') + '</details>'
+        : termBlock(null, 'cmdTerm')) +
       '<div class="term-foot"><span class="grow">以 SSH 登录用户身份执行 · Enter 运行 · ↑↓ 历史</span><span class="mono">' + esc(info.user || 'root') + '@' + esc(info.host || '') + '</span></div>';
     parts.push(acc('ssh', 'terminal', 'SSH 终端', sshBody, state.cmdOut ? 'last: ' + state.cmdLast.slice(0, 18) : 'shell'));
 
     /* --- link / hardware --- */
     const wan = lab.wan || {};
-    let linkBody = '<div class="kv">' +
+    let linkBody = opMsgHtml('link') + '<div class="kv">' +
       '<span><b>接口</b> ' + esc(wan.device || '—') + '</span>' +
       '<span><b>协议</b> ' + esc((wan.proto || '—').toUpperCase()) + '</span>' +
       '<span><b>网关</b> ' + esc(wan.gateway || '—') + '</span>' +
@@ -2982,11 +3171,14 @@
         '<div class="setting-sub">' + esc(lab.wireless.ssid || '未启用') + (lab.wireless.channel ? ' · CH' + esc(lab.wireless.channel) : '') + '</div></div>' +
         '<span class="status-pill ' + (lab.wireless.enabled ? 'on' : '') + '">' + (lab.wireless.enabled ? 'ON' : 'OFF') + '</span></div>';
     }
-    if (lab.cellular && lab.cellular.present) {
-      linkBody += '<div class="setting-row"><div class="grow"><div class="setting-title">4G 模组</div>' +
-        '<div class="setting-sub">' + esc((lab.cellular.devices || []).join(' · ') || lab.cellular.count + ' 个模组') + '</div></div>' +
-        '<span class="status-pill ' + (lab.cellular.internet ? 'on' : '') + '">' + (lab.cellular.internet ? 'LINK' : 'IDLE') + '</span></div>';
-      if (lab.cellular.raw) linkBody += '<div class="raw">' + esc(lab.cellular.raw) + '</div>';
+    if (lab.cellular && (lab.cellular.present || lab.cellular.installed)) {
+      const cm = lab.cellular;
+      const cmNoSim = /ABSENT|NOT INSERTED|NO SIM|MISS|ERROR|FAIL/i.test(cm.simStatus || '');
+      const cmSub = [cm.model, cm.interface, cmNoSim ? '未插卡' : (cm.connected ? '已连接' : '未连接')]
+        .filter(Boolean).join(' · ') || (cm.count + ' 个模组');
+      linkBody += '<div class="setting-row"><div class="grow"><div class="setting-title">蜂窝网络</div>' +
+        '<div class="setting-sub">' + esc(cmSub) + '</div></div>' +
+        '<button type="button" class="btn mini" data-act="cell-detail">蜂窝详情</button></div>';
     }
     if (lab.mwan && lab.mwan.installed) {
       linkBody += '<div class="subblock-title" style="margin-top:8px">MWAN3</div>';
@@ -3300,18 +3492,28 @@
       copyText((lab && lab.fingerprint) || (state.info && state.info.fingerprint) || '', '主机指纹');
       return;
     }
-    if (act === 'pf-new') { state.pfFormOpen = true; renderLab(); return; }
-    if (act === 'pf-cancel') { state.pfFormOpen = false; renderLab(); return; }
+    if (act === 'pf-new') {
+      state.pfFormOpen = true;
+      state.pfDraft = { name: '', proto: 'tcp', ext: '', destPort: '', destIP: defaultDestIP() };
+      renderLab();
+      return;
+    }
+    if (act === 'pf-cancel') {
+      state.pfFormOpen = false;
+      state.pfDraft = { name: '', proto: 'tcp', ext: '', destPort: '', destIP: '' };
+      renderLab();
+      return;
+    }
     if (act === 'pf-toggle') {
       const id = btn.dataset.id;
       const on = btn.dataset.on === '1';
       btn.classList.add('busy');
       try {
         await state.api.TogglePortForward(id, !on);
-        toast(!on ? '规则已启用' : '规则已停用', 'ok', 2000);
+        setOpMsg('pf', 'ok', !on ? '规则已启用。' : '规则已停用。');
         await fetchLab();
         await refreshSnapshot(true);
-      } catch (e) { toastError(e); btn.classList.remove('busy'); }
+      } catch (e) { opFail('pf', e); }
       return;
     }
     if (act === 'pf-del') {
@@ -3319,10 +3521,10 @@
       arm(btn, '删除', async () => {
         try {
           await state.api.DeletePortForward(id);
-          toast('规则已删除', 'ok', 2000);
+          setOpMsg('pf', 'ok', '规则已删除。');
           await fetchLab();
           await refreshSnapshot(true);
-        } catch (e) { toastError(e); }
+        } catch (e) { opFail('pf', e); }
       });
       return;
     }
@@ -3332,35 +3534,37 @@
       const extPort = ($('#pfExt') || {}).value || '';
       const destIP = ($('#pfDestIP') || {}).value || '';
       const destPort = ($('#pfDestPort') || {}).value || '';
+      state.pfDraft = { name, proto, ext: extPort, destPort, destIP };
       if (!extPort || !destIP || !destPort) { toast('请填写外部端口、内网 IP 与内网端口', 'error'); return; }
       btn.disabled = true;
       try {
         await state.api.AddPortForward({ name: name.trim(), proto, extPort: extPort.trim(), destIp: destIP.trim(), destPort: destPort.trim() });
-        toast('端口映射已添加', 'ok', 2400);
-        state.pfFormOpen = false;
+        setOpMsg('pf', 'ok', '已添加：' + proto.toUpperCase() + ' ' + extPort.trim() + ' → ' + destIP.trim() + ':' + destPort.trim() + '。');
         await fetchLab();
         await refreshSnapshot(true);
-      } catch (e) { toastError(e); btn.disabled = false; }
+      } catch (e) { opFail('pf', e); }
       return;
     }
     if (act === 'dns-save') {
       const val = ($('#dnsInput') || {}).value || '';
+      state.dnsDraft = val;
       btn.disabled = true;
       try {
         await state.api.SetDNS(val);
-        toast('DNS 上游已保存', 'ok', 2400);
+        const list = val.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+        setOpMsg('dns', 'ok', list.length ? '已保存上游 DNS：' + list.join('、') + '。' : '已清空静态上游，改用上游自动下发。');
         await fetchLab();
-      } catch (e) { toastError(e); btn.disabled = false; }
+      } catch (e) { opFail('dns', e); }
       return;
     }
     if (act === 'fc-toggle') {
       btn.classList.add('busy');
       try {
         await state.api.SetFullCone(!lab.fullcone);
-        toast(lab.fullcone ? 'FullCone 已关闭' : 'FullCone 已开启', 'ok', 2200);
+        setOpMsg('dns', 'ok', lab.fullcone ? 'FullCone NAT 已关闭。' : 'FullCone NAT 已开启。');
         await fetchLab();
         await refreshSnapshot(true);
-      } catch (e) { toastError(e); btn.classList.remove('busy'); }
+      } catch (e) { opFail('dns', e); }
       return;
     }
     if (act === 'svc-toggle') {
@@ -3369,19 +3573,19 @@
       btn.classList.add('busy');
       try {
         await state.api.ToggleService(name, !on);
-        toast(name + (!on ? ' 已启用' : ' 已停用'), 'ok', 2200);
+        setOpMsg('svc', 'ok', name + (!on ? ' 已启用。' : ' 已停用。'));
         await refreshSnapshot(true);
         if (state.labTab === 'tools') await fetchLab(); else await fetchConsole(true);
-      } catch (e) { toastError(e); btn.classList.remove('busy'); }
+      } catch (e) { opFail('svc', e); }
       return;
     }
     if (act === 'unblock') {
       try {
         await state.api.SetBlocked(btn.dataset.mac, false);
-        toast('已解除拉黑', 'ok', 2000);
+        setOpMsg('svc', 'ok', '已解除拉黑 ' + btn.dataset.mac + '。');
         await fetchLab();
         await refreshSnapshot(true);
-      } catch (e) { toastError(e); }
+      } catch (e) { opFail('svc', e); }
       return;
     }
     if (act === 'probe-ping' || act === 'probe-trace') {
@@ -3427,9 +3631,12 @@
   async function runWan(action) {
     try {
       await state.api.WanAction(action);
-      toast('WAN 操作已下发：' + action, 'ok', 2400);
+      const text = action === 'up' ? '已请求拉起 WAN 接口。'
+        : action === 'renew' ? '已请求续约 WAN 租约。' : '已断开 WAN 接口。';
+      setOpMsg('link', 'ok', text);
+      renderLab();
       setTimeout(() => { refreshSnapshot(false); if (state.labOpen) refreshLab(); }, 1600);
-    } catch (e) { toastError(e); }
+    } catch (e) { opFail('link', e); }
   }
 
   async function runProbe(kind) {
@@ -3437,6 +3644,7 @@
     const target = (input ? input.value : state.probeTarget).trim();
     if (!target) { toast('请输入探测目标', 'error'); return; }
     state.probeTarget = target;
+    state.probeKind = kind;
     state.probeBusy = true;
     renderLab();
     try {
@@ -3453,6 +3661,32 @@
     state.probeBusy = false;
     renderLab();
     scrollLab('acc-probe');
+  }
+
+  function probeSummary(kind, r) {
+    if (!r) return null;
+    const out = String(r.output || '');
+    const code = Number(r.exitCode);
+    if (kind === 'ping') {
+      const loss = /(\d+(?:\.\d+)?)%\s*packet loss/i.exec(out);
+      const avg = /=\s*[\d.]+\/([\d.]+)\//.exec(out);
+      const reachable = code === 0 && (!loss || Number(loss[1]) < 100);
+      if (reachable) {
+        return { tone: 'ok', text: '网络可达' + (avg ? '，平均延迟 ' + avg[1] + ' ms' : '') + (loss ? '，丢包 ' + loss[1] + '%' : '') };
+      }
+      return { tone: 'bad', text: '目标不可达' + (loss ? '，丢包 ' + loss[1] + '%' : '') };
+    }
+    const hops = out.split('\n').filter((l) => /^\s*\d+\s+\S/.test(l)).length;
+    if (code === 0 || hops > 0) return { tone: 'ok', text: '路由追踪完成，共 ' + hops + ' 跳' };
+    return { tone: 'bad', text: '路由追踪没有返回结果' };
+  }
+
+  function cmdVerdict(r) {
+    if (!r) return null;
+    const code = Number(r.exitCode);
+    if (code === 0) return { tone: 'ok', text: '执行成功，退出码 0' };
+    if (code < 0) return { tone: 'bad', text: '命令没有执行完成，展开输出查看原因' };
+    return { tone: 'warn', text: '命令返回非零退出码 ' + code };
   }
 
   async function runCommand() {
@@ -3566,7 +3800,7 @@
       state.labTab = b.dataset.labtab;
       renderLab();
       if (state.labTab === 'tools') fetchLab();
-      else if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); }
+      else if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); ensureMarketIndex(); }
       else fetchConsole();
     }));
     const offlineMarketBtn = $('#offlineMarketBtn');
@@ -3661,9 +3895,21 @@
       if (actBtn) handleLabAction(actBtn);
     });
 
+    $('#labContent').addEventListener('toggle', (e) => {
+      const d = e.target && e.target.closest ? e.target.closest('details[data-mkdetail]') : null;
+      if (!d) return;
+      if (d.dataset.mkdetail === 'repo') state.market.repoOpen = d.open;
+      if (d.dataset.mkdetail === 'curated') state.market.curatedOpen = d.open;
+    }, true);
+
     $('#labContent').addEventListener('change', (e) => {
       if (e.target.id === 'cfgSelect') loadConfigValues(e.target.value);
       if (e.target.id === 'logKind') state.logKind = e.target.value;
+      if (e.target.id === 'mkCat') {
+        state.market.cat = e.target.value;
+        state.market.page = 0;
+        updateMarketList();
+      }
       if (e.target.id === 'mkOnlyNew') {
         state.market.onlyNew = !!e.target.checked;
         state.market.page = 0;
@@ -3792,6 +4038,11 @@
         if (new URLSearchParams(location.search).get('cell') === '1') setTimeout(openCellView, 700);
         const ctab = new URLSearchParams(location.search).get('console');
         if (ctab) setTimeout(() => { state.cTab = ctab; openLab(null, 'console'); }, 700);
+        const acc = new URLSearchParams(location.search).get('acc');
+        if (acc) acc.split(',').forEach((k) => { if (k.trim()) state.accOpen.add(k.trim()); });
+        const labtab = new URLSearchParams(location.search).get('lab');
+        const focus = new URLSearchParams(location.search).get('focus');
+        if (labtab) setTimeout(() => openLab(focus ? 'acc-' + focus : null, labtab), 700);
       } else if (cfg.saved && cfg.auth !== 'password') {
         doConnect();
       }

@@ -841,7 +841,16 @@ func appendUnique(list []string, v string) []string {
 
 func noSIM(s string) bool {
 	u := strings.ToUpper(strings.TrimSpace(s))
-	return strings.Contains(u, "ABSENT") || strings.Contains(u, "NOT INSERTED") || strings.Contains(u, "NO SIM")
+	if u == "" {
+		return false
+	}
+	// QModem Next 在 modem_ctrl info 里用 "miss" 表示未插卡，旧固件常见 ABSENT / NOT INSERTED。
+	for _, bad := range []string{"ABSENT", "NOT INSERTED", "NO SIM", "MISS", "ERROR", "FAIL"} {
+		if strings.Contains(u, bad) {
+			return true
+		}
+	}
+	return false
 }
 
 type modemSignals struct {

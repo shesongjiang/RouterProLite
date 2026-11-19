@@ -125,8 +125,11 @@ func TestLiveConsole(t *testing.T) {
 	t.Logf("ifaces=%d packages=%d configs=%d processes=%d plugins=%d",
 		len(c.Interfaces), c.PackageCount, len(c.Configs), len(c.Processes), len(c.Plugins))
 	for _, it := range c.Interfaces {
-		t.Logf("iface %-8s up=%-5v proto=%-6s dev=%-8s ips=%d gw=%v dns=%d", it.Name, it.Up, it.Proto, it.Device, len(it.IPs), it.Gateway != "", len(it.DNS))
+		t.Logf("iface %-8s up=%-5v proto=%-6s dev=%-8s ips=%d gw=%v dns=%d cell=%v", it.Name, it.Up, it.Proto, it.Device, len(it.IPs), it.Gateway != "", len(it.DNS), it.CellModem)
 	}
+	t.Logf("modem present=%v installed=%v connected=%v model=%q sim=%q iface=%s mode=%q operator=%q rsrp=%d",
+		meta.Modem.Present, meta.Modem.Installed, meta.Modem.Connected, meta.Modem.Model,
+		meta.Modem.SIMStatus, meta.Modem.Interface, meta.Modem.Mode, meta.Modem.Operator, meta.Modem.RSRP)
 	runPlugins := []string{}
 	for _, p := range c.Plugins {
 		if p.Running {
@@ -200,10 +203,14 @@ func TestLiveConsole(t *testing.T) {
 	if rates == nil {
 		rates = &Rates{}
 	}
-	t.Logf("snapshot connected=%v tiles=%d clients=%d plugins=%d cpu=%.1f%% mem=%dMB/%dMB wanUp=%v proto=%s rateRx=%.0fB/s",
+	t.Logf("snapshot connected=%v tiles=%d clients=%d plugins=%d cpu=%.1f%% mem=%dMB/%dMB flash=%dKB/%dKB wanUp=%v proto=%s rateRx=%.0fB/s",
 		snap.Connected, len(snap.Tiles), len(snap.Clients), len(snap.Plugins),
 		sys.CPUPct, sys.MemUsed/1048576, sys.MemTotal/1048576,
+		sys.FlashFree/1024, sys.FlashTotal/1024,
 		wan.Up, wan.Proto, rates.WanRx)
+	if sys.FlashTotal > 0 && sys.FlashFree > sys.FlashTotal {
+		t.Errorf("flash free 大于 total：free=%d total=%d", sys.FlashFree, sys.FlashTotal)
+	}
 	for _, p := range snap.Ports {
 		t.Logf("port %-5s up=%-5v state=%-6s speed=%-10s detail=%s", p.Key, p.Up, p.State, p.Speed, p.Detail)
 	}

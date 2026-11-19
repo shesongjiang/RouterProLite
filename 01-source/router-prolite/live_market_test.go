@@ -26,6 +26,41 @@ func waitJob(t *testing.T, a *App, id string, timeout time.Duration) *InstallJob
 	}
 }
 
+// TestLiveMarketIndex 直接走插件市场页面的数据入口，验证设备源能被完整拉取。
+func TestLiveMarketIndex(t *testing.T) {
+	if os.Getenv("PROLITE_LIVE") != "1" {
+		t.Skip("set PROLITE_LIVE=1 to run against the real router")
+	}
+	r, _ := liveDial(t)
+	a := &App{router: r}
+	view, err := a.GetMarketIndex(nil)
+	if err != nil {
+		t.Fatalf("market index: %v", err)
+	}
+	installed, withDesc := 0, 0
+	cats := map[string]bool{}
+	for _, p := range view.Packages {
+		if p.Installed {
+			installed++
+		}
+		if p.Description != "" {
+			withDesc++
+		}
+		cats[p.Section] = true
+	}
+	t.Logf("market total=%d installed=%d withDesc=%d sections=%d sources=%d elapsed=%dms",
+		view.Total, installed, withDesc, len(cats), len(view.Sources), view.ElapsedMs)
+	for _, c := range view.Checks {
+		t.Logf("index %-6s %-12s %-4s %s", c.ID, c.Label, c.Level, c.Detail)
+	}
+	if view.Total < 1000 {
+		t.Fatalf("包数量异常：%d", view.Total)
+	}
+	if installed == 0 {
+		t.Fatalf("没有标记已安装包")
+	}
+}
+
 func TestLiveMarketCandidates(t *testing.T) {
 	if os.Getenv("PROLITE_LIVE") != "1" {
 		t.Skip("set PROLITE_LIVE=1 to run against the real router")

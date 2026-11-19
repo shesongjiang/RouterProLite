@@ -385,13 +385,18 @@ func buildPorts(meta *Meta, wan, wan6 *WANInfo, rates *Rates, clients []Client, 
 			if cellUp {
 				cellState = "UP"
 			}
-			if meta.Modem.Mode != "" {
-				detail = meta.Modem.Mode
+			if noSIM(meta.Modem.SIMStatus) {
+				cellState = "无 SIM"
+				detail = "未插 SIM 卡"
 			} else {
-				detail = "蜂窝网络"
-			}
-			if meta.Modem.Operator != "" {
-				detail = meta.Modem.Operator
+				if meta.Modem.Mode != "" {
+					detail = meta.Modem.Mode
+				} else {
+					detail = "蜂窝网络"
+				}
+				if meta.Modem.Operator != "" {
+					detail = meta.Modem.Operator
+				}
 			}
 			if meta.Modem.Interface != "" {
 				detail += " · " + meta.Modem.Interface
@@ -628,8 +633,10 @@ func (r *Router) collectSnapshot(meta *Meta, info *ConnectionInfo) (*Snapshot, e
 		ProcessCount:  procs,
 		TempC:         temp,
 		TempAvailable: tempAvail,
-		FlashTotal:    sys.Root.Total,
-		FlashFree:     sys.Root.Free,
+		// ubus system info 的 root.total/free 以 KiB 计数（与 df 的 1K-blocks 一致），
+		// 前端按字节格式化，这里统一换算，避免把 1928 KiB 显示成 2 KB。
+		FlashTotal: sys.Root.Total * 1024,
+		FlashFree:  sys.Root.Free * 1024,
 	}
 	if totalMem > 0 {
 		sysInfo.MemPct = math.Round(float64(sysInfo.MemUsed)/float64(totalMem)*1000) / 10
