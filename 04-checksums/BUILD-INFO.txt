@@ -1,4 +1,4 @@
-﻿build_time: 2026-11-20 21:01:09
+﻿build_time: 2026-11-20 21:01:59
 go: go version go1.27.4 windows/amd64
 exe: 02-bin/ProLite.exe
 size: 15944704 bytes

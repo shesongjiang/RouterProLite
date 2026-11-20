@@ -52,7 +52,7 @@ eab6d732fb75a14febacc345c06764ef1a0d2b4ad1caaaf3afd8ce6943a465a6  01-source\rout
 44626bb0670b9295d8795f606918c6b976f08102043b48572d0d8dc55e8fab97  01-source\router-prolite\docs\BIN-README.md
 05d17980c52d78de388db86f0019ab65e0fd091f2a1bbc1acf5bb3dc248ff84e  01-source\router-prolite\docs\CHANGES-M1.md
 d054450c99aadebf513a0d4d906492442e6236b445d52a02f21f021240be7d80  01-source\router-prolite\docs\install-pipeline-design.md
-1beb928ca91e7eb59d2a10b30e18141f9abce9f2fef6d025193e82c080bfa4eb  01-source\router-prolite\docs\项目工作记忆与构建说明.md
+166bfb971d953ae555ea66b7e1d689aac0d0cdd940ce9ec2f13a6a2a84216ae2  01-source\router-prolite\docs\项目工作记忆与构建说明.md
 6a5648e21a573d4917ed8bfdde8001289f9e2885d0d497d91730e30306226ee6  01-source\router-prolite\frontend\app.js
 6c5785e498daf89c6d8483ed3f33b4d046f5caa513432c1a2669769e0c6512cf  01-source\router-prolite\frontend\index.html
 a83dc0c4ff55ae91f438dc02250fad7f0f4c8ce851caae984b90d7eeb1efd78e  01-source\router-prolite\frontend\market-i18n.js
@@ -66,4 +66,4 @@ fe0cca3163f49d4cb42e313f55ccdff87c47669078e53a5d2881e98f7c9a9af1  01-source\rout
 44626bb0670b9295d8795f606918c6b976f08102043b48572d0d8dc55e8fab97  03-docs\BIN-README.md
 05d17980c52d78de388db86f0019ab65e0fd091f2a1bbc1acf5bb3dc248ff84e  03-docs\CHANGES-M1.md
 d054450c99aadebf513a0d4d906492442e6236b445d52a02f21f021240be7d80  03-docs\install-pipeline-design.md
-1beb928ca91e7eb59d2a10b30e18141f9abce9f2fef6d025193e82c080bfa4eb  03-docs\项目工作记忆与构建说明.md
+166bfb971d953ae555ea66b7e1d689aac0d0cdd940ce9ec2f13a6a2a84216ae2  03-docs\项目工作记忆与构建说明.md
