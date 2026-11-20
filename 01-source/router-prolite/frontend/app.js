@@ -3676,13 +3676,31 @@
       } else if (act === 'close') state.api.CloseApp();
     });
 
+    // 窗口拖拽区的 mousedown 会被原生拖动逻辑消费，dblclick 不一定触发，
+    // 这里在捕获阶段自己做双击判定，保证标题栏双击能最大化/还原。
+    let lastTapAt = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
     document.querySelectorAll('.topbar, .dragbar').forEach((el) => {
-      el.addEventListener('dblclick', (e) => {
+      el.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
         if (e.target.closest('button, input, select, textarea, a')) return;
         if (!state.api || !state.api.WindowToggleMaximise) return;
-        state.api.WindowToggleMaximise();
-        setTimeout(syncWinMax, 80);
-      });
+        const now = Date.now();
+        const dx = Math.abs(e.clientX - lastTapX);
+        const dy = Math.abs(e.clientY - lastTapY);
+        if (now - lastTapAt < 420 && dx < 8 && dy < 8) {
+          e.preventDefault();
+          e.stopPropagation();
+          lastTapAt = 0;
+          state.api.WindowToggleMaximise();
+          setTimeout(syncWinMax, 80);
+          return;
+        }
+        lastTapAt = now;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+      }, true);
     });
 
     async function syncWinMax() {
