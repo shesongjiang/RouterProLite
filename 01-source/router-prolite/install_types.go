@@ -44,11 +44,13 @@ type InstallPlan struct {
 	TotalSize    int64       `json:"totalSize"`
 	TotalInstall int64       `json:"totalInstall"`
 	Warnings     []string    `json:"warnings"`
+	ResolveMode  string      `json:"resolveMode"` // device | pc
 }
 
 // InstallRequest 是前端发起的一次预演/安装请求。
 type InstallRequest struct {
-	Mode           string   `json:"mode"` // feed | local
+	Mode           string   `json:"mode"`        // feed | local
+	ResolveMode    string   `json:"resolveMode"` // device（默认，设备侧解析）| pc（本机闭包后上传）
 	Package        string   `json:"package"`
 	Version        string   `json:"version"`
 	LocalPath      string   `json:"localPath"`
@@ -82,6 +84,8 @@ type InstallResult struct {
 	Success      bool            `json:"success"`
 	Code         string          `json:"code"`
 	Message      string          `json:"message"`
+	Reason       string          `json:"reason"` // 分类后的中文失败原因，如“源不可达”
+	Hint         string          `json:"hint"`   // 对应的中文处理建议
 	Rollbackable bool            `json:"rollbackable"`
 	Simulate     string          `json:"simulate"`
 	Installed    []string        `json:"installed"`
@@ -92,17 +96,18 @@ type InstallResult struct {
 
 // InstallJobView 是暴露给前端的任务快照。
 type InstallJobView struct {
-	ID        string         `json:"id"`
-	Phase     string         `json:"phase"`
-	Percent   int            `json:"percent"`
-	DryRun    bool           `json:"dryRun"`
-	Running   bool           `json:"running"`
-	Env       *PkgEnv        `json:"env"`
-	Plan      *InstallPlan   `json:"plan"`
-	Checks    []Check        `json:"checks"`
-	Files     []JobFile      `json:"files"`
-	Log       []string       `json:"log"`
-	Result    *InstallResult `json:"result"`
-	StartedAt int64          `json:"startedAt"`
-	LogPath   string         `json:"logPath"`
+	ID          string         `json:"id"`
+	Phase       string         `json:"phase"`
+	Percent     int            `json:"percent"`
+	DryRun      bool           `json:"dryRun"`
+	ResolveMode string         `json:"resolveMode"`
+	Running     bool           `json:"running"`
+	Env         *PkgEnv        `json:"env"`
+	Plan        *InstallPlan   `json:"plan"`
+	Checks      []Check        `json:"checks"`
+	Files       []JobFile      `json:"files"`
+	Log         []string       `json:"log"`
+	Result      *InstallResult `json:"result"`
+	StartedAt   int64          `json:"startedAt"`
+	LogPath     string         `json:"logPath"`
 }

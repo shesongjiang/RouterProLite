@@ -35,8 +35,8 @@ func loadWindowState() windowState {
 	if st.W <= 0 || st.H <= 0 {
 		st.W, st.H = 1120, 760
 	}
-	if st.W < 760 {
-		st.W = 760
+	if st.W < 520 {
+		st.W = 520
 	}
 	if st.H < 520 {
 		st.H = 520

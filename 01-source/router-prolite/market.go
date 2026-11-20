@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"sort"
@@ -55,17 +56,22 @@ type MarketIndexView struct {
 
 // MarketResolveRequest 是“加入计划 / 预检”的输入。
 type MarketResolveRequest struct {
-	Mode    string   `json:"mode"`
-	Package string   `json:"package"`
-	Version string   `json:"version"`
-	Repos   []string `json:"repos"`
+	Mode        string   `json:"mode"`
+	ResolveMode string   `json:"resolveMode"`
+	Package     string   `json:"package"`
+	Version     string   `json:"version"`
+	Repos       []string `json:"repos"`
 }
 
 // MarketPlanView 是加入计划后的依赖树与预检结论（不下载、不上传）。
 type MarketPlanView struct {
-	Env    *PkgEnv      `json:"env"`
-	Plan   *InstallPlan `json:"plan"`
-	Checks []Check      `json:"checks"`
+	Env           *PkgEnv      `json:"env"`
+	Plan          *InstallPlan `json:"plan"`
+	Checks        []Check      `json:"checks"`
+	ResolveMode   string       `json:"resolveMode"` // device | pc
+	Simulate      string       `json:"simulate"`    // 设备侧 simulate 输出
+	Blocked       bool         `json:"blocked"`     // 本机闭包模式拒绝内核相关包
+	BlockedReason string       `json:"blockedReason"`
 }
 
 // GetMarketRepos 返回设备只读带出的仓库；未连接时返回空列表与提示，不报错。
@@ -179,10 +185,18 @@ func (a *App) GetMarketIndex(repos []string) (*MarketIndexView, error) {
 }
 
 // ResolvePlan 用设备环境 + 索引做依赖求解与元数据预检；不下载、不上传。
+// resolveMode=device 时由设备 apk simulate 预演；resolveMode=pc 时在 PC 求闭包并拒绝内核相关包。
 func (a *App) ResolvePlan(req MarketResolveRequest) (*MarketPlanView, error) {
 	pkg := strings.TrimSpace(req.Package)
 	if pkg == "" {
 		return nil, fmt.Errorf("请选择要安装的包")
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.ResolveMode))
+	if mode == "" {
+		mode = "device"
+	}
+	if mode != "device" && mode != "pc" {
+		return nil, fmt.Errorf("依赖解析方式必须是 device 或 pc")
 	}
 	env, err := a.router.ReadPkgEnv()
 	if err != nil || env == nil {
@@ -201,6 +215,35 @@ func (a *App) ResolvePlan(req MarketResolveRequest) (*MarketPlanView, error) {
 	if len(env.Feeds) == 0 {
 		return nil, fmt.Errorf("没有可用仓库地址")
 	}
+
+	if mode == "device" {
+		target := pkg
+		if strings.TrimSpace(req.Version) != "" && env.Manager == "apk" {
+			target = pkg + "=" + strings.TrimSpace(req.Version)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		cmd, out, serr := a.deviceSimulate(ctx, env, target, nil)
+		view := &MarketPlanView{Env: env, ResolveMode: "device", Simulate: cmd + "\n" + out, Checks: []Check{}}
+		if serr != nil {
+			reason, hint := classifyFailure("SIMULATE_FAILED", serr.Error()+" "+out)
+			view.Blocked = true
+			view.BlockedReason = reason + "：" + hint
+			view.Checks = append(view.Checks,
+				Check{ID: "DEV-SIM", Stage: "C", Label: "设备侧预演", Level: "fail",
+					Detail: firstNonEmpty(tailText(out, 400), serr.Error())},
+				Check{ID: "DEV-REASON", Stage: "C", Label: "失败原因", Level: "fail",
+					Detail: reason + "：" + hint})
+			return view, nil
+		}
+		view.Checks = append(view.Checks,
+			Check{ID: "DEV-SIM", Stage: "C", Label: "设备侧预演", Level: "ok",
+				Detail: firstNonEmpty(tailText(out, 400), "simulate 通过")},
+			Check{ID: "DEV-MODE", Stage: "index", Label: "依赖解析方式", Level: "ok",
+				Detail: "设备侧解析：依赖与 kmod 由设备 apk 决定，完整预演输出见下方"})
+		return view, nil
+	}
+
 	u, checks, err := a.router.FetchUniverse(env, nil)
 	if err != nil {
 		return nil, err
@@ -214,8 +257,17 @@ func (a *App) ResolvePlan(req MarketResolveRequest) (*MarketPlanView, error) {
 	if err != nil {
 		return nil, err
 	}
-	checks = append(checks, preflightPlan(plan, env)...)
-	return &MarketPlanView{Env: env, Plan: plan, Checks: checks}, nil
+	plan.ResolveMode = "pc"
+	view := &MarketPlanView{Env: env, Plan: plan, Checks: checks, ResolveMode: "pc"}
+	if blocked := pcModeBlocked(plan); len(blocked) > 0 {
+		msg := pcModeBlockedMessage(blocked)
+		view.Blocked = true
+		view.BlockedReason = msg
+		view.Checks = append(view.Checks, Check{ID: "PC-KERNEL", Stage: "A",
+			Label: "本机闭包拒绝内核包", Level: "fail", Detail: msg})
+	}
+	view.Checks = append(view.Checks, preflightPlan(plan, env)...)
+	return view, nil
 }
 
 // parseRepoFeeds 解析用户输入的仓库地址：每行一个 URL，也接受 opkg 的 src/gz 行与 @tag URL。

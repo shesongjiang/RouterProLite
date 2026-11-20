@@ -112,6 +112,76 @@ func TestLiveMarketCandidates(t *testing.T) {
 	}
 }
 
+// TestLiveResolveModes 验证两种解析方式的预演：设备侧 apk simulate 与本机闭包依赖树，
+// 以及本机闭包对 kmod 的明确拒绝。
+func TestLiveResolveModes(t *testing.T) {
+	if os.Getenv("PROLITE_LIVE") != "1" {
+		t.Skip("set PROLITE_LIVE=1 to run against the real router")
+	}
+	r, _ := liveDial(t)
+	a := &App{router: r}
+	pkg := os.Getenv("PROLITE_PACKAGE")
+	if pkg == "" {
+		pkg = "luci-app-ddns"
+	}
+	for _, mode := range []string{"device", "pc"} {
+		view, err := a.ResolvePlan(MarketResolveRequest{Mode: "feed", ResolveMode: mode, Package: pkg})
+		if err != nil {
+			t.Fatalf("resolve %s: %v", mode, err)
+		}
+		t.Logf("mode=%s blocked=%v checks=%d simulate=%q", mode, view.Blocked, len(view.Checks), tailText(view.Simulate, 80))
+		for _, c := range view.Checks {
+			t.Logf("  %-6s %-20s %-4s %s", c.ID, c.Label, c.Level, tailText(c.Detail, 160))
+		}
+		if view.Plan != nil {
+			t.Logf("  plan pkgs=%d download=%d install=%d", len(view.Plan.Packages), view.Plan.TotalSize, view.Plan.TotalInstall)
+			for _, it := range view.Plan.Packages {
+				t.Logf("    %-30s %-16s arch=%-12s size=%d dangerous=%v", it.Name, it.Version, it.Arch, it.Size, it.Dangerous)
+			}
+		}
+		if mode == "device" && view.Blocked {
+			t.Fatalf("设备侧 simulate 不应被拒绝")
+		}
+	}
+
+	kview, err := a.ResolvePlan(MarketResolveRequest{Mode: "feed", ResolveMode: "pc", Package: "kmod"})
+	if err != nil {
+		t.Logf("跳过 kmod 活体检查：索引中没有可用的 kmod 包（%v）", err)
+		return
+	}
+	if !kview.Blocked {
+		t.Fatalf("本机闭包必须拒绝 kmod，blocked=%v checks=%+v", kview.Blocked, kview.Checks)
+	}
+	t.Logf("kmod 本机闭包拒绝：%s", kview.BlockedReason)
+}
+
+// TestLiveInstallJobDryRun 走完整安装任务但 dryRun，覆盖两种解析方式的预演路径。
+func TestLiveInstallJobDryRun(t *testing.T) {
+	if os.Getenv("PROLITE_LIVE") != "1" {
+		t.Skip("set PROLITE_LIVE=1 to run against the real router")
+	}
+	r, _ := liveDial(t)
+	a := &App{router: r}
+	for _, mode := range []string{"device", "pc"} {
+		id, err := a.StartInstallJob(InstallRequest{Mode: "feed", ResolveMode: mode,
+			Package: "luci-app-ddns", DryRun: true})
+		if err != nil {
+			t.Fatalf("start %s: %v", mode, err)
+		}
+		view := waitJob(t, a, id, 6*time.Minute)
+		if view.Result == nil || !view.Result.Success {
+			t.Fatalf("%s dry-run 未通过：%+v", mode, view.Result)
+		}
+		t.Logf("%s dry-run OK：code=%s msg=%s", mode, view.Result.Code, view.Result.Message)
+		if view.Plan != nil {
+			t.Logf("  plan pkgs=%d download=%d", len(view.Plan.Packages), view.Plan.TotalSize)
+		}
+		if view.Result.Simulate != "" {
+			t.Logf("  simulate: %s", tailText(view.Result.Simulate, 180))
+		}
+	}
+}
+
 // TestLiveMarketInstallRollback 在真机上完成一次真实安装、回读、卸载回滚与再次回读。
 // 需要 PROLITE_LIVE=1 与 PROLITE_INSTALL=1 双重开关，避免误触发写入。
 func TestLiveMarketInstallRollback(t *testing.T) {
@@ -135,7 +205,7 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	}
 
 	id, err := a.StartInstallJob(InstallRequest{
-		Mode: "feed", Package: pkg, DryRun: false, Commit: true,
+		Mode: "feed", ResolveMode: "device", Package: pkg, DryRun: false, Commit: true,
 		Confirmed: true, ConfirmWrites: true, ConfirmText: "192.168.100.1",
 	})
 	if err != nil {
@@ -171,8 +241,26 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	}
 	t.Logf("回读确认：%s %s 已安装", pkg, inst.Version)
 
-	// 卸载回滚，不使用 --force / --allow-untrusted
-	cmd := "apk del " + shq(pkg)
+	// 卸载回滚：删除本次新增的全部包（含设备侧解析带出的依赖），
+	// 不使用 --force / --allow-untrusted，确保包数量回到安装前。
+	remove := []string{}
+	if view.Result.Changes != nil {
+		for _, line := range view.Result.Changes.PackagesAdded {
+			name := strings.Fields(line)
+			if len(name) > 0 {
+				remove = append(remove, name[0])
+			}
+		}
+	}
+	if len(remove) == 0 {
+		remove = []string{pkg}
+	}
+	quoted := make([]string, 0, len(remove))
+	for _, n := range remove {
+		quoted = append(quoted, shq(n))
+	}
+	cmd := "apk del " + strings.Join(quoted, " ")
+	t.Logf("回滚删除 %d 个包：%v", len(remove), remove)
 	t.Logf("$ %s", cmd)
 	out, err := r.execJob(ctx, cmd, 180*time.Second, func(s string) { t.Logf("del: %s", s) })
 	if err != nil {

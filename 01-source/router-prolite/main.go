@@ -51,7 +51,7 @@ func main() {
 		Title:            "Pro-Lite",
 		Width:            ws.W,
 		Height:           ws.H,
-		MinWidth:         760,
+		MinWidth:         520,
 		MinHeight:        520,
 		Frameless:        true,
 		DisableResize:    false,

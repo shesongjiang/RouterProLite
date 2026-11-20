@@ -88,6 +88,13 @@ func Solve(u *Universe, env *PkgEnv, root *PlanItem) (*InstallPlan, []Check, err
 		if len(cands) == 0 {
 			cands = u.Providers[spec.name]
 			via = "（虚拟包）"
+			// 设备上已安装的提供者优先视为满足：例如 ddns-scripts 依赖虚拟包 ip，
+			// 设备已装 ip-full 时不能再拉 ip-tiny，否则两者冲突导致 simulate 失败。
+			for _, c := range cands {
+				if _, ok := env.Installed[c.Name]; ok {
+					return nil
+				}
+			}
 		}
 		var pick *IndexPkg
 		for _, c := range cands {

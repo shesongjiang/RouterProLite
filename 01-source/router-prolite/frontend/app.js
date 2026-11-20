@@ -77,6 +77,11 @@
       cat: '',
       onlyNew: false,
       sort: 'name',
+      resolveMode: (function () {
+        try {
+          return localStorage.getItem('prolite-resolve-mode') === 'pc' ? 'pc' : 'device';
+        } catch (e) { return 'device'; }
+      })(),
       page: 0,
       pageSize: 10,
       selected: null,
@@ -661,29 +666,104 @@
         const pkg = (req && req.package) || 'luci-app-demo';
         const id = 'mock-' + (++mockJobSeq);
         const dry = !req || req.dryRun !== false;
+        const mode = req && req.resolveMode === 'pc' ? 'pc' : 'device';
+        const kernel = /^(kmod-|kernel|linux-)/.test(pkg);
+        if (mode === 'pc' && kernel) {
+          mockJobs[id] = {
+            id, phase: 'failed', percent: 40, dryRun: dry, resolveMode: mode, running: false,
+            plan: null, checks: [], files: [],
+            log: ['解析方式：本机闭包后上传', '检测到内核相关包：' + pkg, '已拒绝，未下载任何文件'],
+            result: {
+              success: false, code: 'PC_MODE_KERNEL_BLOCKED',
+              reason: '本机闭包拒绝内核包',
+              hint: '本机下载的内核模块可能与设备内核哈希不匹配；请切换“设备侧解析”，由设备 apk 选择 kmod。',
+              message: '内核相关包不允许走本机闭包模式',
+            },
+          };
+          return id;
+        }
+        const planPkgs = mode === 'device'
+          ? [{ name: pkg, version: '1.0.0-r1', arch: 'all', size: 180000, installedSize: 420000, isRoot: true, installed: false, status: 'pending', reason: '目标包（设备侧解析）' }]
+          : [
+            { name: pkg, version: '1.0.0-r1', arch: 'all', size: 180000, installedSize: 420000, isRoot: true, installed: false, status: 'pending', reason: '目标包' },
+            { name: 'luci-lib-base', version: '1.0.0-r1', arch: 'all', size: 60000, installedSize: 120000, isRoot: false, installed: false, status: 'pending', reason: '由 ' + pkg + ' 依赖' },
+          ];
+        const planTotal = mode === 'device' ? 180000 : 240000;
         mockJobs[id] = {
           id,
           phase: 'done',
           percent: 100,
           dryRun: dry,
+          resolveMode: mode,
           running: false,
-          plan: {
-            packages: [{ name: pkg, version: '1.0.0-r1', arch: 'all', size: 180000, installedSize: 420000, isRoot: true, installed: false, status: 'pending', reason: '目标' }],
-            totalSize: 180000,
-            totalInstall: 420000,
-            warnings: [],
-          },
-          checks: [
-            { id: 'SPACE-OVERLAY', stage: 'A', label: 'overlay 空间充足', level: 'ok', detail: '可用 48 MB，预计占用 420 KB' },
-            { id: 'MARKET-LIMITS', stage: 'A', label: '市场约束通过', level: 'ok', detail: '1 个待安装包，全部为 noarch 且未超体积上限' },
-          ],
-          files: [{ name: pkg + '.apk', size: 180000, sent: 180000, status: 'uploaded' }],
-          log: ['解析设备包源…', '依赖闭包 1 个包', '市场约束通过', '下载完成', 'SHA256 校验通过', '上传 /tmp 完成', 'simulate 通过'],
+          plan: { packages: planPkgs, totalSize: planTotal, totalInstall: 540000, warnings: [], resolveMode: mode },
+          checks: mode === 'device'
+            ? [
+              { id: 'DEV-SIM', stage: 'C', label: '设备侧预演', level: 'ok', detail: 'apk add --simulate ' + pkg + '：OK，依赖由设备解析' },
+              { id: 'DEV-MODE', stage: 'index', label: '依赖解析方式', level: 'ok', detail: '设备侧解析：依赖与 kmod 由设备 apk 决定' },
+            ]
+            : [
+              { id: 'SPACE-OVERLAY', stage: 'A', label: 'overlay 空间充足', level: 'ok', detail: '可用 48 MB，预计占用 540 KB' },
+              { id: 'MODE-PC', stage: 'index', label: '依赖解析方式', level: 'ok', detail: '本机闭包后上传：PC 解析依赖并下载全部包' },
+            ],
+          files: mode === 'device'
+            ? []
+            : [
+              { name: pkg + '.apk', size: 180000, sent: 180000, status: 'uploaded' },
+              { name: 'luci-lib-base.apk', size: 60000, sent: 60000, status: 'uploaded' },
+            ],
+          log: mode === 'device'
+            ? ['读取设备包环境…', '设备侧解析：apk add --simulate ' + pkg, 'simulate 通过', '安装前快照完成']
+            : ['读取设备包环境…', '拉取索引…', '依赖闭包 2 个包', '下载并校验 SHA256', '上传 /tmp 完成', 'simulate 通过'],
           result: dry
-            ? { success: true, code: 'DRY_RUN_OK', message: '预演通过，未写入设备' }
-            : { success: true, code: 'INSTALL_OK', message: '安装完成，共 1 个包' },
+            ? { success: true, code: 'DRY_RUN_OK', message: mode === 'device' ? '设备侧 simulate 通过，未写入设备' : '本机闭包预演通过，未写入设备' }
+            : { success: true, code: 'INSTALL_OK', message: '安装完成，共 ' + planPkgs.length + ' 个包' },
         };
         return id;
+      },
+      ResolvePlan: async (req) => {
+        await sleep(180);
+        const mode = req && req.resolveMode === 'pc' ? 'pc' : 'device';
+        const name = (req && req.package) || 'luci-app-demo';
+        const ver = (req && req.version) || '1.0.0-r1';
+        const kernel = /^(kmod-|kernel|linux-)/.test(name);
+        if (mode === 'device') {
+          return {
+            resolveMode: 'device',
+            plan: null,
+            simulate: '$ apk add --simulate ' + name + '=' + ver + '\n' +
+              '(1/3) Installing luci-lib-base (' + ver + ')\n' +
+              '(2/3) Installing ' + name + ' (' + ver + ')\n' +
+              '(3/3) Installing luci-i18n-' + name + ' (' + ver + ')\n' +
+              'OK: 24 MiB in 128 packages',
+            checks: [
+              { id: 'DEV-SIM', stage: 'C', label: '设备侧预演', level: 'ok', detail: 'apk simulate 通过：3 个包将由设备解析' },
+              { id: 'DEV-MODE', stage: 'index', label: '依赖解析方式', level: 'ok', detail: '设备侧解析：依赖与 kmod 由设备 apk 决定' },
+            ],
+            blocked: false,
+          };
+        }
+        const pkgs = [
+          { name, version: ver, arch: 'all', size: 180000, installedSize: 420000, isRoot: true, installed: false, status: 'pending', reason: '目标包' },
+          { name: 'luci-lib-base', version: ver, arch: 'all', size: 60000, installedSize: 120000, isRoot: false, installed: false, status: 'pending', reason: '由 ' + name + ' 依赖' },
+        ];
+        const plan = { packages: pkgs, totalSize: 240000, totalInstall: 540000, warnings: [], resolveMode: 'pc' };
+        if (kernel) {
+          const msg = '本机闭包模式拒绝安装内核相关包：' + name +
+            '。本机下载的内核模块可能与设备内核哈希不匹配，装了不加载甚至起不来；请切换“设备侧解析”，由设备 apk 按内核哈希选择 kmod。';
+          return {
+            resolveMode: 'pc', plan, blocked: true, blockedReason: msg,
+            checks: [{ id: 'PC-KERNEL', stage: 'A', label: '本机闭包拒绝内核包', level: 'fail', detail: msg }],
+          };
+        }
+        return {
+          resolveMode: 'pc', plan, blocked: false,
+          checks: [
+            { id: 'A-DEPS', stage: 'A', label: '依赖闭包', level: 'ok', detail: '共 2 个包（含目标包），总大小 240 KB' },
+            { id: 'A-SPACE-OVERLAY', stage: 'A', label: 'overlay 空间', level: 'ok', detail: '需要约 540 KB，可用 48 MB' },
+            { id: 'MODE-PC', stage: 'index', label: '依赖解析方式', level: 'ok', detail: '本机闭包后上传：PC 解析依赖并下载全部包' },
+          ],
+        };
       },
       GetInstallJob: async (id) => mockJobs[id] || null,
       CancelInstallJob: async () => {},
@@ -1844,8 +1924,14 @@
       const title = ok ? (job.dryRun ? '预检通过' : '安装完成') : (job.dryRun ? '预检未通过' : '安装未完成');
       const human = ok
         ? (job.dryRun ? '依赖、空间和包完整性检查都通过，可以安装。' : '插件已安装，服务状态已回读。')
-        : humanJobError(job);
+        : (job.result.reason
+          ? job.result.reason + '：' + String(job.result.hint || job.result.message || '')
+          : humanJobError(job));
       h += '<div class="inst-result ' + (ok ? 'ok' : 'bad') + '"><b>' + esc(title) + '</b><span>' + esc(human) + '</span></div>';
+      if (!ok && job.result.reason) {
+        h += '<div class="inst-reason-bad"><span>失败分类</span><b>' + esc(job.result.reason) + '</b><em>' +
+          esc(job.result.hint || '') + '</em><code class="mono">' + esc(job.result.code || '') + '</code></div>';
+      }
       h += '<details class="op-detail"><summary>安装详情（依赖、预检、回读、日志）</summary>';
       if (job.result.installed && job.result.installed.length) {
         h += '<div class="note">已装：' + job.result.installed.map(esc).join('、') + '</div>';
@@ -1906,12 +1992,13 @@
 
   function humanJobError(job) {
     const r = job.result || {};
+    if (r.reason) return r.reason + '：' + String(r.hint || r.message || '');
     const code = String(r.code || '');
     if (/overlay|space|disk/.test(code)) return '设备可写空间不足，先清理空间再安装。';
     if (/depend|missing/.test(code)) return '缺少依赖，刷新索引或换一个版本再试。';
-    if (/arch/.test(code)) return '包架构和设备不匹配。';
-    if (/download|network|timeout/.test(code)) return '下载失败，检查设备和包源的网络。';
-    if (/verify|checksum|signature/.test(code)) return '包完整性校验没通过，已停止安装。';
+    if (/arch|kernel/.test(code)) return '包架构或内核哈希和设备不匹配。';
+    if (/download|network|timeout|unreachable/.test(code)) return '下载失败，检查设备和包源的网络。';
+    if (/verify|checksum|signature/.test(code)) return '包完整性或签名校验没通过，已停止安装。';
     const msg = String(r.message || '').trim();
     return msg && msg.length <= 80 ? msg : '操作没有完成，展开详情查看具体原因。';
   }
@@ -1935,6 +2022,51 @@
   function marketZhFor(name) {
     const n = String(name || '');
     return MARKET_ZH[n] || MARKET_ZH[n.replace(/^luci-app-/, '')] || MARKET_ZH['luci-app-' + n] || null;
+  }
+
+  const MARKET_RESOLVE_KEY = 'prolite-resolve-mode';
+
+  function marketResolveMode() {
+    return state.market.resolveMode === 'pc' ? 'pc' : 'device';
+  }
+
+  function setMarketResolveMode(mode) {
+    state.market.resolveMode = mode === 'pc' ? 'pc' : 'device';
+    try { localStorage.setItem(MARKET_RESOLVE_KEY, state.market.resolveMode); } catch (e) {}
+    state.market.plan = null;
+    state.market.planErr = '';
+    state.market.confirmed = false;
+    renderMarket();
+  }
+
+  function pkgKernelRelated(p) {
+    if (!p) return false;
+    const n = String(p.name || '').toLowerCase();
+    if (n.indexOf('kmod-') === 0 || n === 'kmod' || n === 'kernel' || n.indexOf('kernel-') === 0 || n.indexOf('linux-') === 0) return true;
+    return (p.depends || []).some((d) => {
+      const name = String(d || '').toLowerCase().replace(/^!/, '').split(/[ (>=<~|=]/)[0];
+      return name === 'kernel' || name === 'kmod' || name.indexOf('kmod-') === 0;
+    });
+  }
+
+  function marketModeBlocked() {
+    return marketResolveMode() === 'pc' && pkgKernelRelated(state.market.selected);
+  }
+
+  function marketModeHtml() {
+    const mode = marketResolveMode();
+    let h = '<div class="mk-label">依赖解析方式</div><div class="mk-modes">' +
+      '<button type="button" class="mk-mode' + (mode === 'device' ? ' active' : '') + '" data-act="market-mode" data-mode="device">' +
+        '<b>设备侧解析<em>默认</em></b><span>设备 apk 解析依赖、按内核哈希选 kmod、下载并安装</span></button>' +
+      '<button type="button" class="mk-mode' + (mode === 'pc' ? ' active' : '') + '" data-act="market-mode" data-mode="pc">' +
+        '<b>本机闭包后上传</b><span>PC 解析依赖并下载整套包，逐个上传安装</span></button>' +
+      '</div>';
+    if (marketModeBlocked()) {
+      h += '<div class="note bad mk-mode-block"><b>本机闭包模式不允许内核相关包。</b>' +
+        '本机下载的 kmod 可能与设备内核哈希不匹配，装了不加载甚至起不来；' +
+        '请改用“设备侧解析”，由设备 apk 按内核哈希选择 kmod。</div>';
+    }
+    return h;
   }
 
   async function ensureMarketRepos(force) {
@@ -2169,9 +2301,10 @@
       (p.homepage ? ' · <span class="mono">' + esc(p.homepage) + '</span>' : '') + '</div>';
     h += '<div class="mk-zh">' + (zh ? esc(zh) : esc(p.description || '索引暂未提供说明') + ' <span class="mk-untrans">待翻译</span>') + '</div>';
     if (risk) h += '<div class="mk-risk-line">' + esc(risk) + '：安装后可能导致设备无法启动，需要额外二次确认。</div>';
+    h += marketModeHtml();
     h += '<div class="mk-label">依赖' + ((p.depends || []).length ? '（' + p.depends.length + '）' : '') + '</div>' + deps;
     h += '<div class="row-actions">' +
-      '<button type="button" class="btn mini primary" data-act="market-plan"' + (mk.planLoading ? ' disabled' : '') + '>' + (mk.planLoading ? '预检中…' : '加入计划 / 预检') + '</button>' +
+      '<button type="button" class="btn mini primary" data-act="market-plan"' + ((mk.planLoading || marketModeBlocked()) ? ' disabled' : '') + '>' + (mk.planLoading ? '预检中…' : '加入计划 / 预检') + '</button>' +
       '</div>';
     if (mk.planErr) h += '<div class="note bad">' + esc(mk.planErr) + '</div>';
     h += '</div>';
@@ -2181,34 +2314,51 @@
   function marketPlanHtml() {
     const mk = state.market;
     const view = mk.plan;
-    if (!view || !view.plan) return '';
+    if (!view) return '';
+    const mode = view.resolveMode === 'pc' ? 'pc' : 'device';
     const plan = view.plan;
     const checks = view.checks || [];
     const fails = checks.filter((c) => c.level === 'fail');
     const warns = checks.filter((c) => c.level === 'warn');
-    const pkgs = plan.packages || [];
+    const pkgs = (plan && plan.packages) || [];
     const danger = pkgs.filter((p) => p.dangerous);
-    let h = '<div class="mk-plan">' + sectionHead('check', '预检与安装计划',
-      pkgs.length + ' 个包 · 下载 ' + instBytes(plan.totalSize) + ' · 安装后 ' + instBytes(plan.totalInstall));
+    const sub = mode === 'device'
+      ? '设备侧 simulate · 不写入'
+      : (pkgs.length + ' 个包 · 下载 ' + instBytes(plan.totalSize) + ' · 安装后 ' + instBytes(plan.totalInstall));
+    let h = '<div class="mk-plan">' + sectionHead('check', '预检与安装计划', sub);
     h += '<div class="inst-env">' +
-      instChip('运行结果', fails.length ? '不可安装' : (warns.length ? '可安装（有提示）' : '可安装'), fails.length ? 'bad' : (warns.length ? 'warn' : 'ok')) +
+      instChip('解析方式', mode === 'device' ? '设备侧' : '本机闭包', 'ok') +
+      instChip('运行结果', view.blocked ? '已拒绝' : (fails.length ? '不可安装' : (warns.length ? '可安装（有提示）' : '可安装')),
+        view.blocked ? 'bad' : (fails.length ? 'bad' : (warns.length ? 'warn' : 'ok'))) +
       instChip('系统组件', danger.length ? String(danger.length) + ' 个' : '无', danger.length ? 'warn' : 'ok') +
       '</div>';
+    if (view.blocked) {
+      h += '<div class="note bad"><b>已拒绝：</b>' + esc(view.blockedReason || '本机闭包模式不允许该包') + '</div>';
+    }
     if (checks.length) {
       h += '<div class="inst-title">预检结论</div>';
       h += checks.map((c) =>
         '<div class="inst-check ' + esc(c.level || '') + '"><span class="tag">' + esc(c.stage || '') + '</span>' +
         '<b>' + esc(c.label || c.id) + '</b><em>' + esc(c.detail || '') + '</em></div>').join('');
     }
-    if (plan.warnings && plan.warnings.length) {
+    if (plan && plan.warnings && plan.warnings.length) {
       h += '<div class="note warn">' + plan.warnings.map((w) => esc(w)).join('<br>') + '</div>';
     }
-    h += '<div class="inst-title">依赖树（先依赖，后被依赖）</div><div class="inst-plan">' +
-      pkgs.map((it) => '<div class="inst-plan-row"><div><b>' + esc(it.name) + '</b> <em>' + esc(it.version) + '</em>' +
-        '<span class="inst-arch">' + esc(it.arch || '') + '</span>' +
-        (it.dangerous ? '<span class="mk-risk">' + esc(pkgRisk(it.name) || '系统组件') + '</span>' : '') + '</div>' +
-        '<div class="inst-reason">' + esc(it.isRoot ? '目标包' : (it.reason || '依赖')) + ' · ' + fmtBytes(it.size) + '</div></div>').join('') +
-      '</div>';
+    if (view.simulate) {
+      h += '<div class="inst-title">设备侧 simulate 输出</div><pre class="term">' + esc(view.simulate) + '</pre>';
+    }
+    if (mode === 'device') {
+      h += '<div class="note">设备侧解析：依赖与 kmod 由设备 apk 按当前内核哈希决定，上面的 simulate 就是完整预演；安装时不再由 PC 下载依赖闭包。</div>';
+    } else if (pkgs.length) {
+      h += '<div class="inst-title">依赖树（先依赖，后被依赖）</div><div class="inst-plan">' +
+        pkgs.map((it) => '<div class="inst-plan-row"><div><b>' + esc(it.name) + '</b> <em>' + esc(it.version) + '</em>' +
+          '<span class="inst-arch">' + esc(it.arch || '') + '</span>' +
+          (it.dangerous ? '<span class="mk-risk">' + esc(pkgRisk(it.name) || '系统组件') + '</span>' : '') + '</div>' +
+          '<div class="inst-reason">' + esc(it.isRoot ? '目标包' : (it.reason || '依赖')) + ' · ' + fmtBytes(it.size) + '</div></div>').join('') +
+        '</div>';
+    }
+    if (view.blocked) return h + '</div>';
+
     h += '<label class="mk-check mk-confirm"><input type="checkbox" id="mkConfirm"' + (mk.confirmed ? ' checked' : '') + '> 我已确认包名、来源仓库与安装顺序</label>';
     if (danger.length) {
       h += '<div class="note bad">计划包含 ' + danger.length + ' 个系统组件（kmod / 内核 / 引导 / base-files / libc / apk / opkg），安装后可能导致设备无法启动。</div>';
@@ -2217,10 +2367,13 @@
       h += '<div class="note bad">存在 fail 项（如 overlay 空间不足），暂不能安装。</div>';
     }
     h += '<div class="row-actions">' +
-      '<button type="button" class="btn" data-act="market-dryrun"' + (mk.starting ? ' disabled' : '') + '>先做 dry-run 预演（不写入）</button>' +
+      '<button type="button" class="btn" data-act="market-dryrun"' + (mk.starting ? ' disabled' : '') + '>' +
+        (mode === 'device' ? '设备侧 simulate 预演（不写入）' : '本机闭包预演（下载前不写入设备）') + '</button>' +
       '</div>';
-    h += marketInstallBox(pkgs, danger);
-    h += '<div class="note">下载与上传均做 SHA256 校验；安装前会自动做设备包与 init.d 快照。</div>';
+    h += marketInstallBox(pkgs, danger, mode);
+    h += '<div class="note">' + (mode === 'device'
+      ? '安装前会自动做设备包与 init.d 快照；依赖由设备 apk 下载并校验签名。'
+      : '下载与上传均做 SHA256 校验；安装前会自动做设备包与 init.d 快照。') + '</div>';
     h += '</div>';
     return h;
   }
@@ -2238,16 +2391,17 @@
     const danger = pkgs.some((p) => p.dangerous && !p.installed);
     const fails = ((view && view.checks) || []).some((c) => c.level === 'fail');
     const polDangerOK = !danger || !!(mk.policy && mk.policy.allowDangerous);
-    return !!(mk.selected && view && view.plan && !fails && policyReady() && polDangerOK && mk.confirmed &&
+    return !!(mk.selected && view && !view.blocked && !fails && policyReady() && polDangerOK && mk.confirmed &&
       mk.confirmHost === host && mk.confirmA && mk.confirmB && (!danger || mk.allowDangerous));
   }
 
-  function marketInstallBox(pkgs, danger) {
+  function marketInstallBox(pkgs, danger, mode) {
     const mk = state.market;
     const host = (state.info && state.info.host) || '';
     const pol = mk.policy;
     const pending = pkgs.filter((p) => !p.installed).length;
-    let h = '<div class="mk-confirm-box">' + sectionHead('check', '安装到设备', '确认后才会下载与写入');
+    let h = '<div class="mk-confirm-box">' + sectionHead('check', '安装到设备',
+      mode === 'device' ? '确认后由设备下载并写入' : '确认后才会下载与写入');
     h += '<div class="note warn">将向 <b class="mono">' + esc(host || '当前设备') + '</b> 写入 ' + pending +
       ' 个包；安装前会做快照，失败时不会自动卸载已完成的包。</div>';
     if (!policyReady()) {
@@ -2301,6 +2455,7 @@
     try {
       const id = await state.api.StartInstallJob({
         mode: 'feed',
+        resolveMode: marketResolveMode(),
         package: mk.selected.name,
         version: mk.selected.version,
         localPath: '',
@@ -2384,6 +2539,7 @@
     try {
       mk.plan = await state.api.ResolvePlan({
         mode: 'feed',
+        resolveMode: marketResolveMode(),
         package: mk.selected.name,
         version: mk.selected.version,
         repos: marketRepoLines(),
@@ -2400,6 +2556,7 @@
     const mk = state.market;
     if (!state.connected) { toast('未连接设备：安装预检不可用', 'info'); return; }
     if (!mk.selected) { toast('请先选择一个包', 'info'); return; }
+    if (marketModeBlocked()) { toast('内核相关包不允许走本机闭包模式，请切换设备侧解析', 'error'); return; }
     if (!mk.plan || !mk.plan.plan) { toast('请先点击“加入计划 / 预检”', 'info'); return; }
     if ((mk.plan.checks || []).some((c) => c.level === 'fail')) {
       toast('预检存在 fail 项，禁止进入安装链路', 'error');
@@ -2413,6 +2570,7 @@
     try {
       const id = await state.api.StartInstallJob({
         mode: 'feed',
+        resolveMode: marketResolveMode(),
         package: mk.selected.name,
         version: mk.selected.version,
         localPath: '',
@@ -3199,6 +3357,11 @@
       return;
     }
     if (act === 'market-plan') { await resolveMarketPlan(); return; }
+    if (act === 'market-mode') {
+      setMarketResolveMode(btn.dataset.mode || 'device');
+      if (state.market.selected && !marketModeBlocked()) resolveMarketPlan();
+      return;
+    }
     if (act === 'market-dryrun') { await startMarketJob(); return; }
     if (act === 'market-install') { await installMarketSelected(); return; }
     if (act === 'market-cancel') {
