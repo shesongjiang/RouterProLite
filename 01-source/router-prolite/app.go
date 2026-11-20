@@ -35,6 +35,10 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	applyWindowChrome()
+	if st := loadWindowState(); st.HasPos && !st.Max {
+		runtime.WindowSetPosition(ctx, st.X, st.Y)
+	}
 	cfg := a.store.Load()
 	if cfg.Pinned {
 		runtime.WindowSetAlwaysOnTop(ctx, true)

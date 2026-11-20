@@ -29,6 +29,7 @@ type MarketPkg struct {
 	Size             int64    `json:"size"`
 	InstalledSize    int64    `json:"installedSize"`
 	Description      string   `json:"description"`
+	Zh               string   `json:"zh,omitempty"`
 	License          string   `json:"license"`
 	Section          string   `json:"section"`
 	Origin           string   `json:"origin"`
@@ -142,7 +143,7 @@ func (a *App) GetMarketIndex(repos []string) (*MarketIndexView, error) {
 			mp := &MarketPkg{
 				Name: p.Name, Version: p.Version, Arch: p.Arch,
 				Size: p.Size, InstalledSize: p.InstalledSize,
-				Description: p.Description, License: p.License, Section: p.Section,
+				Description: p.Description, Zh: marketZhText(p.Name, p.Version), License: p.License, Section: p.Section,
 				Origin: p.Origin, Homepage: p.Homepage, Feed: p.Feed, Filename: p.Filename,
 				Depends: p.Depends,
 			}

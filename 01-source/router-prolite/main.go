@@ -45,24 +45,32 @@ func main() {
 		log.Fatal(err)
 	}
 
+	ws := loadWindowState()
 	app := NewApp()
-	err = wails.Run(&options.App{
+	opts := &options.App{
 		Title:            "Pro-Lite",
-		Width:            420,
-		Height:           640,
+		Width:            ws.W,
+		Height:           ws.H,
+		MinWidth:         760,
+		MinHeight:        520,
 		Frameless:        true,
-		DisableResize:    true,
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		DisableResize:    false,
+		BackgroundColour: &options.RGBA{R: 9, G: 9, B: 11, A: 255},
 		AssetServer:      &assetserver.Options{Assets: sub},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
+		OnBeforeClose:    app.beforeClose,
 		Bind:             []interface{}{app},
 		Windows: &windows.Options{
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
 			DisableWindowIcon:    true,
 		},
-	})
+	}
+	if ws.Max {
+		opts.WindowStartState = options.Maximised
+	}
+	err = wails.Run(opts)
 	if err != nil {
 		log.Fatal(err)
 	}

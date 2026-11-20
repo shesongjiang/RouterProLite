@@ -84,34 +84,30 @@ func TestLiveMarketCandidates(t *testing.T) {
 			t.Logf("  %s %s arch=%s size=%d", p.Name, p.Version, p.Arch, p.Size)
 		}
 	}
-	for _, e := range marketCatalog {
-		if inst, ok := env.Installed[e.Package]; ok {
-			t.Logf("candidate %-28s installed %s", e.Package, inst.Version)
+	for _, name := range []string{"luci-app-sqm", "luci-app-ddns", "ttyd", "aria2", "sqm-scripts"} {
+		if inst, ok := env.Installed[name]; ok {
+			t.Logf("candidate %-28s installed %s", name, inst.Version)
 			continue
 		}
-		root, err := RootItemFromIndex(u, e.Package, "")
+		root, err := RootItemFromIndex(u, name, "")
 		if err != nil {
-			t.Logf("candidate %-28s ROOT-ERR %v", e.Package, err)
+			t.Logf("candidate %-28s ROOT-ERR %v", name, err)
 			continue
 		}
 		plan, _, err := Solve(u, env, root)
 		if err != nil {
-			t.Logf("candidate %-28s SOLVE-ERR %v", e.Package, err)
+			t.Logf("candidate %-28s SOLVE-ERR %v", name, err)
 			continue
 		}
-		bad, total := []string{}, int64(0)
+		total := int64(0)
 		for _, p := range plan.Packages {
-			if p.Installed {
-				continue
-			}
-			total += p.InstalledSize
-			if !isNoarch(p.Arch) {
-				bad = append(bad, p.Name+"("+p.Arch+")")
+			if !p.Installed {
+				total += p.InstalledSize
 			}
 		}
-		t.Logf("candidate %-28s pkgs=%d install=%dB non-noarch=%v", e.Package, len(plan.Packages), total, bad)
+		t.Logf("candidate %-28s pkgs=%d install=%dB", name, len(plan.Packages), total)
 		for _, p := range plan.Packages {
-			t.Logf("    %-32s %-18s arch=%-12s size=%d install=%d installed=%v", p.Name, p.Version, p.Arch, p.Size, p.InstalledSize, p.Installed)
+			t.Logf("    %-32s %-18s arch=%-12s size=%d install=%d installed=%v dangerous=%v", p.Name, p.Version, p.Arch, p.Size, p.InstalledSize, p.Installed, p.Dangerous)
 		}
 	}
 }
@@ -122,13 +118,9 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	if os.Getenv("PROLITE_LIVE") != "1" || os.Getenv("PROLITE_INSTALL") != "1" {
 		t.Skip("set PROLITE_LIVE=1 PROLITE_INSTALL=1 to run real install on the router")
 	}
-	marketID := os.Getenv("PROLITE_MARKET_ID")
-	if marketID == "" {
-		marketID = "uhttpd"
-	}
-	entry, ok := marketCatalogByID(marketID)
-	if !ok {
-		t.Fatalf("unknown market id %q", marketID)
+	pkg := os.Getenv("PROLITE_PACKAGE")
+	if pkg == "" {
+		pkg = "uhttpd"
 	}
 	r, _ := liveDial(t)
 	a := &App{router: r, jobs: map[string]*InstallJob{}}
@@ -138,12 +130,12 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read env: %v", err)
 	}
-	if _, exists := before.Installed[entry.Package]; exists {
-		t.Fatalf("%s 已安装，无法做干净安装验证", entry.Package)
+	if _, exists := before.Installed[pkg]; exists {
+		t.Fatalf("%s 已安装，无法做干净安装验证", pkg)
 	}
 
 	id, err := a.StartInstallJob(InstallRequest{
-		MarketID: marketID, DryRun: false, Commit: true,
+		Mode: "feed", Package: pkg, DryRun: false, Commit: true,
 		Confirmed: true, ConfirmWrites: true, ConfirmText: "192.168.100.1",
 	})
 	if err != nil {
@@ -173,14 +165,14 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back after install: %v", err)
 	}
-	inst, exists := afterInstall.Installed[entry.Package]
+	inst, exists := afterInstall.Installed[pkg]
 	if !exists {
-		t.Fatalf("回读未发现 %s", entry.Package)
+		t.Fatalf("回读未发现 %s", pkg)
 	}
-	t.Logf("回读确认：%s %s 已安装", entry.Package, inst.Version)
+	t.Logf("回读确认：%s %s 已安装", pkg, inst.Version)
 
 	// 卸载回滚，不使用 --force / --allow-untrusted
-	cmd := "apk del " + shq(entry.Package)
+	cmd := "apk del " + shq(pkg)
 	t.Logf("$ %s", cmd)
 	out, err := r.execJob(ctx, cmd, 180*time.Second, func(s string) { t.Logf("del: %s", s) })
 	if err != nil {
@@ -196,11 +188,11 @@ func TestLiveMarketInstallRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back after uninstall: %v", err)
 	}
-	if _, still := afterRemove.Installed[entry.Package]; still {
-		t.Fatalf("卸载后 %s 仍存在", entry.Package)
+	if _, still := afterRemove.Installed[pkg]; still {
+		t.Fatalf("卸载后 %s 仍存在", pkg)
 	}
 	t.Logf("回读确认：%s 已卸载；包总数 %d → %d → %d",
-		entry.Package, len(before.Installed), len(afterInstall.Installed), len(afterRemove.Installed))
+		pkg, len(before.Installed), len(afterInstall.Installed), len(afterRemove.Installed))
 	if len(afterRemove.Installed) != len(before.Installed) {
 		t.Fatalf("包数量未恢复：安装前 %d，卸载后 %d", len(before.Installed), len(afterRemove.Installed))
 	}
@@ -220,11 +212,11 @@ func TestLiveMarketDryRunSQM(t *testing.T) {
 	r, _ := liveDial(t)
 	a := &App{router: r, jobs: map[string]*InstallJob{}}
 
-	marketID := os.Getenv("PROLITE_MARKET_ID")
-	if marketID == "" {
-		marketID = "sqm"
+	pkg := os.Getenv("PROLITE_PACKAGE")
+	if pkg == "" {
+		pkg = "sqm-scripts"
 	}
-	id, err := a.StartInstallJob(InstallRequest{MarketID: marketID, DryRun: true})
+	id, err := a.StartInstallJob(InstallRequest{Mode: "feed", Package: pkg, DryRun: true})
 	if err != nil {
 		t.Fatalf("start dry-run: %v", err)
 	}

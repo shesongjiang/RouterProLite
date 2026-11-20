@@ -189,12 +189,10 @@ func (a *App) executeInstall(ctx context.Context, job *InstallJob, env *PkgEnv, 
 
 	logf := job.addLine
 	logf("真实安装开始：目标设备 " + a.router.TargetHost() + "，共 " + fmt.Sprint(len(plan.Packages)) + " 个计划项")
-	// 写入前最后一道硬闸：危险包直接拒绝，任何确认参数都不能绕过。
+	// 危险包已在前置授权中要求 allowDangerous=true 且界面二次确认，这里只记录。
 	for _, it := range plan.Packages {
-		if !it.Installed && dangerousPackage(it.Name) {
-			msg := "危险包被硬性拒绝：" + it.Name + "（kmod/内核/引导/base-files/libc/apk/opkg）"
-			logf(msg)
-			return &InstallResult{Code: "DANGER_FORBIDDEN", Message: msg, Simulate: simCmd}
+		if !it.Installed && it.Dangerous {
+			logf("系统组件： " + it.Name + "（已通过 allowDangerous 与二次确认）")
 		}
 	}
 	before, err := a.readDeviceState(ctx)

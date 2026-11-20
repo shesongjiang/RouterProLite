@@ -130,50 +130,30 @@ func (a *App) PickPackageFile() (string, error) {
 }
 
 // prepareInstallRequest 归一化并校验安装请求。
-// 返回 isMarket=true 表示请求来自插件市场：包名由内置目录决定，且允许真实安装；
-// 其他入口仍然只允许 dry-run 预演。
-func prepareInstallRequest(req *InstallRequest) (bool, error) {
+// 全量包列表与本地包都允许真实安装，写入前的授权由 authorizeDeviceWrite 统一校验。
+func prepareInstallRequest(req *InstallRequest) error {
 	req.Mode = strings.TrimSpace(req.Mode)
 	req.Package = strings.TrimSpace(req.Package)
 	req.LocalPath = strings.TrimSpace(req.LocalPath)
-	req.MarketID = strings.TrimSpace(req.MarketID)
 
-	if req.MarketID != "" {
-		entry, ok := marketCatalogByID(req.MarketID)
-		if !ok {
-			return true, fmt.Errorf("插件市场中不存在条目 %q", req.MarketID)
-		}
-		req.Mode = "feed"
-		req.Package = entry.Package
-		req.Version = ""
-		req.LocalPath = ""
-		// 市场安装只使用设备自身的包源，避免自定义仓库替换同名包绕过内置目录。
-		req.Repos = nil
-		if !req.DryRun && !req.Commit {
-			return true, fmt.Errorf("真实安装必须设置 commit=true")
-		}
-		return true, nil
-	}
-
-	if !req.DryRun {
-		return false, fmt.Errorf("真实安装仅对插件市场开放；其他安装仍为 dry-run 预演")
-	}
 	if req.Mode != "feed" && req.Mode != "local" {
-		return false, fmt.Errorf("安装模式必须是 feed 或 local")
+		return fmt.Errorf("安装模式必须是 feed 或 local")
 	}
 	if req.Mode == "feed" && req.Package == "" {
-		return false, fmt.Errorf("请输入要预演的包名")
+		return fmt.Errorf("请输入要安装或预演的包名")
 	}
 	if req.Mode == "local" && req.LocalPath == "" {
-		return false, fmt.Errorf("请选择本地包文件")
+		return fmt.Errorf("请选择本地包文件")
 	}
-	return false, nil
+	if !req.DryRun && !req.Commit {
+		return fmt.Errorf("真实安装必须设置 commit=true")
+	}
+	return nil
 }
 
-// StartInstallJob 启动安装任务：插件市场可真实安装，其他入口仅 dry-run 预演。
+// StartInstallJob 启动安装任务：dry-run 只预演，commit=true 才会写入设备。
 func (a *App) StartInstallJob(req InstallRequest) (string, error) {
-	isMarket, err := prepareInstallRequest(&req)
-	if err != nil {
+	if err := prepareInstallRequest(&req); err != nil {
 		return "", err
 	}
 	if req.Mode == "local" {
@@ -197,7 +177,7 @@ func (a *App) StartInstallJob(req InstallRequest) (string, error) {
 		logPath:   installLogPath(jobID),
 		cancel:    cancel,
 	}
-	job.addLine(fmt.Sprintf("任务 %s 开始：mode=%s dryRun=%v market=%v package=%s", jobID, req.Mode, req.DryRun, isMarket, req.Package))
+	job.addLine(fmt.Sprintf("任务 %s 开始：mode=%s dryRun=%v package=%s", jobID, req.Mode, req.DryRun, req.Package))
 	a.jobsMu.Lock()
 	if a.jobs == nil {
 		a.jobs = map[string]*InstallJob{}
@@ -344,26 +324,12 @@ func (a *App) runInstallJob(ctx context.Context, job *InstallJob) {
 	plan, solveChecks, err := Solve(universe, env, root)
 	job.addChecks(solveChecks)
 	if err != nil {
-		msg := err.Error()
-		if job.req.MarketID != "" {
-			msg += "；插件市场只允许 noarch 脚本/LuCI 包，依赖中的 kmod 或编译型组件不提供安装入口"
-		}
-		fail("DEP_UNRESOLVED", msg)
+		fail("DEP_UNRESOLVED", err.Error())
 		return
 	}
 	job.mu.Lock()
 	job.plan = plan
 	job.mu.Unlock()
-	if job.req.MarketID != "" {
-		mchecks := marketPlanChecks(plan)
-		job.addChecks(mchecks)
-		for _, c := range mchecks {
-			if c.Level == "fail" {
-				fail(c.ID, c.Label+"："+c.Detail)
-				return
-			}
-		}
-	}
 	initJobFiles(job, plan)
 	a.runPreflightAndDryRun(ctx, job, env, plan, emit, fail, done)
 }
@@ -582,8 +548,8 @@ func preflightPlan(plan *InstallPlan, env *PkgEnv) []Check {
 		}
 		if dangerousPackage(it.Name) {
 			it.Dangerous = true
-			checks = append(checks, Check{ID: "DANGER_FORBIDDEN", Stage: "A", Label: "禁止安装 " + it.Name,
-				Level: "fail", Detail: "kmod/内核/引导/base-files/libc/apk/opkg 等危险包被硬性拒绝，任何确认都不能绕过"})
+			checks = append(checks, Check{ID: "DANGER-REVIEW-" + it.Name, Stage: "A", Label: "系统组件 " + it.Name,
+				Level: "warn", Detail: "属于 kmod/内核/引导/base-files/libc/apk/opkg 等系统组件；安装后可能导致设备无法启动，需单独二次确认"})
 		}
 	}
 	need := needInstall + needInstall/8

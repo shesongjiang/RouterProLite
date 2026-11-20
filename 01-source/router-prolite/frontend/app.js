@@ -73,7 +73,6 @@
       loading: false,
       checks: [],
       repoOpen: false,
-      curatedOpen: false,
       search: '',
       cat: '',
       onlyNew: false,
@@ -86,18 +85,15 @@
       planErr: '',
       confirmed: false,
       allowDangerous: false,
-      starting: false,
-      jobId: '',
-      job: null,
-      jobKind: '',
-      pollTimer: null,
-      catalog: null,
-      catalogErr: '',
-      catalogLoading: false,
-      pluginId: '',
+      policy: null,
+      policyErr: '',
       confirmHost: '',
       confirmA: false,
       confirmB: false,
+      starting: false,
+      jobId: '',
+      job: null,
+      pollTimer: null,
     },
   };
 
@@ -246,7 +242,7 @@
     };
     const names = [
       'GetConfig', 'Connect', 'Disconnect', 'GetSnapshot', 'GetLab', 'SetAlwaysOnTop',
-      'CloseApp', 'PickKeyFile', 'ResetFingerprint', 'CopyText', 'AddPortForward',
+      'CloseApp', 'WindowMinimise', 'WindowToggleMaximise', 'WindowIsMaximised', 'PickKeyFile', 'ResetFingerprint', 'CopyText', 'AddPortForward',
       'TogglePortForward', 'DeletePortForward', 'SetStaticLease', 'SetBlocked', 'SetDNS',
       'SetFullCone', 'ToggleService', 'WanAction', 'ReloadNetwork', 'RebootRouter',
       'RunProbe', 'ExecCommand', 'GetConsole', 'GetLogs', 'GetConfigs', 'GetConfigValues',
@@ -254,7 +250,7 @@
       'SetDHCPPool', 'SetUPnP', 'InterfaceAction', 'ReloadService',
       'GetPkgEnv', 'InspectLocalPackage', 'PickPackageFile', 'StartInstallJob',
       'CancelInstallJob', 'GetInstallJob', 'GetMarketRepos', 'GetMarketIndex', 'ResolvePlan',
-      'GetPluginMarket',
+      'GetDeviceWritePolicy',
     ];
     const api = {};
     names.forEach((n) => { api[n] = call(n); });
@@ -571,14 +567,6 @@
       ].join('\n');
     }
 
-    const mockPlugins = [
-      { id: 'sqm', package: 'luci-app-sqm', title: 'SQM 智能队列', category: '网络', description: '用 CAKE/fq_codel 抗缓冲膨胀，改善下载时的游戏与视频通话延迟。', installed: false, installedVersion: '' },
-      { id: 'ddns', package: 'luci-app-ddns', title: '动态 DNS', category: '网络', description: '把动态公网 IP 绑定到域名，方便远程访问路由器或内网服务。', installed: false, installedVersion: '' },
-      { id: 'banip', package: 'luci-app-banip', title: 'banIP 黑名单', category: '安全', description: '基于 nftables 的 IP 黑名单，支持订阅公开威胁情报列表。', installed: false, installedVersion: '' },
-      { id: 'uhttpd', package: 'luci-app-uhttpd', title: 'Web 服务器设置', category: '服务', description: '调整 LuCI 所用 uhttpd 的端口、证书与监听地址。', installed: false, installedVersion: '' },
-      { id: 'firewall', package: 'luci-app-firewall', title: '防火墙设置', category: '网络', description: '图形化维护区域、转发规则与端口开放；多数固件已预装。', installed: true, installedVersion: '24.10.1' },
-      { id: 'opkg', package: 'luci-app-opkg', title: '软件包管理（opkg）', category: '系统', description: 'opkg 固件上的图形化软件包管理界面。', installed: true, installedVersion: '24.10.1' },
-    ];
     const mockJobs = {};
     let mockJobSeq = 0;
 
@@ -619,24 +607,6 @@
         d.mountPoint = '';
         return mockStorageView();
       },
-      GetPluginMarket: async () => {
-        await sleep(160);
-        return {
-          connected: true,
-          host: cfg.host,
-          manager: 'apk',
-          arch: 'aarch64_cortex-a53',
-          kernel: '6.6.1',
-          release: 'OpenWrt 24.10.1',
-          overlayKb: 48000,
-          tmpKb: 120000,
-          installed: 286,
-          plugins: mockPlugins,
-          limits: { maxPkgInstall: 4 * 1024 * 1024, maxTotalInstall: 12 * 1024 * 1024 },
-          policy: { configured: true, matches: true, host: cfg.host, path: 'C:\\Users\\you\\AppData\\Roaming\\ProLite\\device-write-allow.json', error: '' },
-          note: '',
-        };
-      },
       GetMarketIndex: async () => {
         await sleep(180);
         const defs = [
@@ -668,6 +638,10 @@
           ['luci-app-ksmbd', 'KSMBD 文件共享', '服务'],
           ['luci-app-netdata', 'Netdata 监控', '系统'],
           ['luci-app-crowdsec', 'CrowdSec 防护', '安全'],
+          ['kmod-usb-net-rtl8152', 'USB RTL8152/RTL8153 ethernet driver', 'Kernel'],
+          ['base-files', 'Base filesystem and default configuration', 'System'],
+          ['libc', 'Standard C library', 'Libraries'],
+          ['openssl-util', 'OpenSSL command line utilities', 'Utilities'],
         ];
         const packages = defs.map((d, i) => ({
           name: d[0],
@@ -676,14 +650,15 @@
           installed: i % 5 === 0,
           description: d[1],
           section: d[2],
+          // 模拟后端翻译缓存：前 28 个已有中文说明，最后 4 个仅英文、显示“待翻译”
+          zh: i < defs.length - 4 ? d[1] : '',
           origin: 'feeds',
         }));
         return { connected: true, packages, total: packages.length, sources: [{ url: 'device:feeds', count: packages.length }], elapsedMs: 142 };
       },
       StartInstallJob: async (req) => {
         await sleep(220);
-        const plugin = mockPlugins.find((p) => p.id === (req && req.marketId));
-        const pkg = plugin ? plugin.package : 'luci-app-demo';
+        const pkg = (req && req.package) || 'luci-app-demo';
         const id = 'mock-' + (++mockJobSeq);
         const dry = !req || req.dryRun !== false;
         mockJobs[id] = {
@@ -712,9 +687,16 @@
       },
       GetInstallJob: async (id) => mockJobs[id] || null,
       CancelInstallJob: async () => {},
+      GetDeviceWritePolicy: async () => ({
+        configured: true, path: 'C:\\Users\\you\\AppData\\Roaming\\ProLite\\device-write-allow.json',
+        host: (state.info && state.info.host) || '', allowOverlay: true, allowTmp: true, allowDangerous: true, matches: true, error: '',
+      }),
       GetLab: async () => { await sleep(180); return lab(); },
       SetAlwaysOnTop: async () => {},
       CloseApp: async () => { toast('桌面应用内此按钮会关闭窗口', 'info'); },
+      WindowMinimise: async () => {},
+      WindowToggleMaximise: async () => {},
+      WindowIsMaximised: async () => document.body.classList.contains('win-max'),
       PickKeyFile: async () => 'C:\\Users\\you\\.ssh\\id_ed25519',
       ResetFingerprint: async () => { cfg.fingerprint = ''; },
       CopyText: async (text) => {
@@ -1466,7 +1448,7 @@
     view.classList.add('open');
     view.setAttribute('aria-hidden', 'false');
     renderLab();
-    if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); ensureMarketIndex(); return; }
+    if (state.labTab === 'market') { ensureMarketRepos(); ensureMarketIndex(); loadMarketPolicy(); return; }
     if (state.labTab === 'tools') await fetchLab();
     else await fetchConsole();
     if (focus) scrollLab(focus);
@@ -1722,7 +1704,7 @@
     const c = state.console;
     let crumb;
     if (state.labTab === 'console') crumb = [info.hostname, c && (c.board && c.board.model || c.cpuModel)].filter(Boolean).join(' · ');
-    else if (state.labTab === 'market') crumb = '精选 noarch 插件 → 预演 → 确认写入';
+    else if (state.labTab === 'market') crumb = '全量插件 → 预检 → dry-run 预演';
     else crumb = [info.hostname, info.model].filter(Boolean).join(' · ');
     $('#labCrumb').textContent = crumb || 'advanced';
     $$('.lab-tabs button').forEach((b) => {
@@ -2000,6 +1982,24 @@
     return String(p.origin || '其他').trim() || '其他';
   }
 
+  function marketZh(p) {
+    if (p && p.zh) return p.zh;
+    const m = marketZhFor(p && p.name);
+    return m ? m.d : '';
+  }
+
+  function pkgRisk(name) {
+    const n = String(name || '').toLowerCase();
+    if (n.indexOf('kmod-') === 0) return '内核模块';
+    if (n === 'kernel' || n.indexOf('linux-') === 0) return '内核本体';
+    if (n.indexOf('uboot') === 0 || n.indexOf('bootloader') >= 0) return 'Bootloader';
+    if (n.indexOf('base-files') === 0) return '基础系统';
+    if (n === 'libc' || n.indexOf('libc-') === 0) return '系统库';
+    if (n === 'apk' || n.indexOf('opkg') === 0) return '包管理器';
+    if (n.indexOf('mtd') === 0 || n.indexOf('firmware') >= 0) return '固件';
+    return '';
+  }
+
   function marketCats() {
     const set = new Set();
     ((state.market.index && state.market.index.packages) || []).forEach((p) => set.add(marketCatOf(p)));
@@ -2014,10 +2014,10 @@
     if (mk.cat) list = list.filter((p) => marketCatOf(p) === mk.cat);
     if (q) {
       list = list.filter((p) => {
-        const zh = marketZhFor(p.name);
+        const zh = marketZh(p);
         return p.name.toLowerCase().indexOf(q) >= 0 ||
           String(p.description || '').toLowerCase().indexOf(q) >= 0 ||
-          (zh && (zh.d + zh.u).toLowerCase().indexOf(q) >= 0);
+          (zh && zh.toLowerCase().indexOf(q) >= 0);
       });
     }
     if (mk.sort === 'size') list.sort((a, b) => (b.size || 0) - (a.size || 0));
@@ -2038,14 +2038,17 @@
     const page = Math.max(0, Math.min(mk.page, pages - 1));
     const start = page * mk.pageSize;
     const rows = list.slice(start, start + mk.pageSize).map((p) => {
-      const zh = marketZhFor(p.name);
-      const desc = zh ? (zh.d + ' · ' + zh.u) : (p.description || '索引未提供说明');
-      const untrans = zh ? '' : '<span class="mk-untrans">未翻译</span>';
+      const zh = marketZh(p);
+      const risk = pkgRisk(p.name);
+      const desc = zh || p.description || '索引暂未提供说明';
+      const untrans = zh ? '' : '<span class="mk-untrans">待翻译</span>';
       const sel = mk.selected && mk.selected.name === p.name && mk.selected.version === p.version ? ' selected' : '';
       return '<button type="button" class="mk-card' + sel + '" data-act="market-select" data-name="' + esc(p.name) + '" data-ver="' + esc(p.version) + '">' +
         '<span class="mk-card-head"><b class="mono">' + esc(p.name) + '</b>' +
+          (risk ? '<span class="mk-risk">' + esc(risk) + '</span>' : '') +
           (p.installed ? '<span class="mk-badge on">已安装</span>' : '<span class="mk-badge">未安装</span>') + '</span>' +
         '<span class="mk-card-desc">' + esc(clipText(desc, 90)) + ' ' + untrans + '</span>' +
+        (risk ? '<span class="mk-risk-note">安装后可能导致设备无法启动</span>' : '') +
         '<span class="mk-card-foot"><span class="mono">' + esc(p.version) + '</span>' +
           '<span class="mono">' + fmtBytes(p.size) + '</span>' +
           '<span class="tag">' + esc(marketCatOf(p)) + '</span></span>' +
@@ -2064,129 +2067,6 @@
   function updateMarketList() {
     const wrap = $('#mkListWrap');
     if (wrap) wrap.innerHTML = marketListHtml();
-  }
-
-  function marketPluginDetailHtml() {
-    const mk = state.market;
-    const p = marketCatalogItem();
-    if (!p) return '';
-    let h = '<div class="mk-plugin-detail">' + sectionHead('plug', p.title, p.package);
-    h += '<div class="mk-zh">' + esc(p.description) + '</div>';
-    h += '<div class="kv">' +
-      '<span><b>分类</b> ' + esc(p.category) + '</span>' +
-      '<span><b>状态</b> ' + (p.installed ? '已安装' + (p.installedVersion ? ' ' + esc(p.installedVersion) : '') : '未安装') + '</span>' +
-      '</div>';
-    if (p.installed) {
-      h += '<div class="note">该插件已安装；如需重装或检查更新，请使用下方“高级”模式。</div>';
-    } else {
-      h += '<div class="row-actions"><button type="button" class="btn mini primary" data-act="market-preview"' +
-        (mk.starting ? ' disabled' : '') + '>' + (mk.starting ? '正在启动预演…' : '检查空间与依赖（预演）') + '</button></div>';
-      h += '<div class="note">预演会下载包到本机、校验 SHA256、上传到 /tmp 并执行离线 simulate，不会安装。</div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  function marketConfirmHtml() {
-    const mk = state.market;
-    const job = mk.job;
-    if (mk.jobKind !== 'market' || !job || !job.dryRun || !job.result || !job.result.success) return '';
-    const host = (mk.catalog && mk.catalog.host) || '';
-    const pol = mk.catalog && mk.catalog.policy;
-    const pkgs = (job.plan && job.plan.packages) || [];
-    const pending = pkgs.filter((p) => !p.installed);
-    const ready = !!(pol && pol.configured && pol.matches);
-    const can = ready && mk.confirmHost === host && mk.confirmA && mk.confirmB;
-    let h = '<div class="mk-confirm-box">' + sectionHead('check', '确认写入设备', '预演通过，尚未安装');
-    h += '<div class="note warn">将向 <b class="mono">' + esc(host) + '</b> 写入 ' + pending.length +
-      ' 个包。安装完成后不会自动重启任何服务。</div>';
-    if (!ready) {
-      h += '<div class="note bad">未通过设备写入授权：' + esc((pol && pol.error) || '未配置授权文件') + '</div>';
-      h += '<div class="note">请在 <span class="mono">' + esc((pol && pol.path) || '') +
-        '</span> 配置授权文件，写入 host、allowOverlay=true、allowTmp=true。</div>';
-    }
-    h += '<label class="mk-label">逐字输入设备地址确认</label>';
-    h += '<input id="mkConfirmHost" class="input" spellcheck="false" placeholder="' + esc(host) + '" value="' + esc(mk.confirmHost) + '">';
-    h += '<label class="mk-check"><input type="checkbox" id="mkConfirmA"' + (mk.confirmA ? ' checked' : '') + '> 我确认写入设备</label>';
-    h += '<label class="mk-check"><input type="checkbox" id="mkConfirmB"' + (mk.confirmB ? ' checked' : '') + '> 我确认写入 overlay 与 /tmp</label>';
-    h += '<div class="row-actions"><button type="button" class="btn primary" data-act="market-commit"' + (can ? '' : ' disabled') + '>开始安装到设备</button></div>';
-    h += '<div class="note">点击后才会真实安装；安装失败会保留已完成包并给出回读差异，不会自动卸载。</div>';
-    h += '</div>';
-    return h;
-  }
-
-  function syncMarketCommit() {
-    const mk = state.market;
-    const host = (mk.catalog && mk.catalog.host) || '';
-    const pol = mk.catalog && mk.catalog.policy;
-    const btn = document.querySelector('[data-act="market-commit"]');
-    if (!btn) return;
-    btn.disabled = !(pol && pol.configured && pol.matches && mk.confirmHost === host && mk.confirmA && mk.confirmB);
-  }
-
-  async function startMarketPreview() {
-    const mk = state.market;
-    const p = marketCatalogItem();
-    if (!state.connected) { toast('未连接设备：无法预演', 'info'); return; }
-    if (!p) { toast('请先选择一个插件', 'info'); return; }
-    if (p.installed) { toast('该插件已安装；重装请使用高级模式', 'info'); return; }
-    if (mk.starting) return;
-    mk.starting = true;
-    mk.job = null;
-    mk.jobId = '';
-    mk.jobKind = 'market';
-    mk.confirmHost = '';
-    mk.confirmA = false;
-    mk.confirmB = false;
-    renderMarket();
-    try {
-      const id = await state.api.StartInstallJob({
-        marketId: p.id,
-        dryRun: true,
-        commit: false,
-        repos: marketRepoLines(),
-      });
-      mk.jobId = id;
-      pollMarketJob(id);
-    } catch (e) {
-      mk.starting = false;
-      toastError(e);
-      renderMarket();
-    }
-  }
-
-  async function commitMarketInstall() {
-    const mk = state.market;
-    const p = marketCatalogItem();
-    if (!p || !mk.job || !mk.job.result || !mk.job.result.success) { toast('请先完成预演', 'error'); return; }
-    if (mk.starting) return;
-    const host = (mk.catalog && mk.catalog.host) || '';
-    if (mk.confirmHost !== host) { toast('请输入完整设备地址确认', 'error'); return; }
-    if (!mk.confirmA || !mk.confirmB) { toast('请勾选两项写入确认', 'error'); return; }
-    mk.starting = true;
-    renderMarket();
-    try {
-      const id = await state.api.StartInstallJob({
-        marketId: p.id,
-        dryRun: false,
-        commit: true,
-        confirmed: true,
-        confirmWrites: true,
-        confirmText: mk.confirmHost,
-        allowDangerous: false,
-        repos: marketRepoLines(),
-      });
-      mk.jobId = id;
-      mk.job = null;
-      mk.confirmHost = '';
-      mk.confirmA = false;
-      mk.confirmB = false;
-      pollMarketJob(id);
-    } catch (e) {
-      mk.starting = false;
-      toastError(e);
-      renderMarket();
-    }
   }
 
   function renderMarket() {
@@ -2261,11 +2141,7 @@
     }
     h += '</div></details>';
 
-    h += '<details class="mk-advanced" data-mkdetail="curated"' + (mk.curatedOpen ? ' open' : '') + '><summary>精选插件（一键安装）</summary><div class="mk-advanced-body">' +
-      marketCuratedHtml() + '</div></details>';
-
     if (mk.job) h += installJobHtml(mk.job);
-    if (mk.job) h += marketConfirmHtml();
     host.innerHTML = h;
     if (scroll) scroll.scrollTop = top;
   }
@@ -2274,7 +2150,8 @@
     const mk = state.market;
     const p = mk.selected;
     if (!p) return '';
-    const zh = marketZhFor(p.name);
+    const zh = marketZh(p);
+    const risk = pkgRisk(p.name);
     const deps = (p.depends || []).length
       ? '<div class="mk-deps">' + p.depends.map((d) => '<span class="mk-dep mono">' + esc(d) + '</span>').join('') + '</div>'
       : '<div class="note">索引未声明依赖</div>';
@@ -2290,7 +2167,8 @@
       '</div>';
     h += '<div class="mk-origin">来源仓库：<span class="mono">' + esc(p.feed || '—') + '</span>' +
       (p.homepage ? ' · <span class="mono">' + esc(p.homepage) + '</span>' : '') + '</div>';
-    h += '<div class="mk-zh">' + (zh ? esc(zh.d) + '（' + esc(zh.u) + '）' : esc(p.description || '索引未提供说明') + ' <span class="mk-untrans">未翻译</span>') + '</div>';
+    h += '<div class="mk-zh">' + (zh ? esc(zh) : esc(p.description || '索引暂未提供说明') + ' <span class="mk-untrans">待翻译</span>') + '</div>';
+    if (risk) h += '<div class="mk-risk-line">' + esc(risk) + '：安装后可能导致设备无法启动，需要额外二次确认。</div>';
     h += '<div class="mk-label">依赖' + ((p.depends || []).length ? '（' + p.depends.length + '）' : '') + '</div>' + deps;
     h += '<div class="row-actions">' +
       '<button type="button" class="btn mini primary" data-act="market-plan"' + (mk.planLoading ? ' disabled' : '') + '>' + (mk.planLoading ? '预检中…' : '加入计划 / 预检') + '</button>' +
@@ -2314,7 +2192,7 @@
       pkgs.length + ' 个包 · 下载 ' + instBytes(plan.totalSize) + ' · 安装后 ' + instBytes(plan.totalInstall));
     h += '<div class="inst-env">' +
       instChip('运行结果', fails.length ? '不可安装' : (warns.length ? '可安装（有提示）' : '可安装'), fails.length ? 'bad' : (warns.length ? 'warn' : 'ok')) +
-      instChip('危险包', danger.length ? String(danger.length) + ' 个' : '无', danger.length ? 'warn' : 'ok') +
+      instChip('系统组件', danger.length ? String(danger.length) + ' 个' : '无', danger.length ? 'warn' : 'ok') +
       '</div>';
     if (checks.length) {
       h += '<div class="inst-title">预检结论</div>';
@@ -2328,107 +2206,119 @@
     h += '<div class="inst-title">依赖树（先依赖，后被依赖）</div><div class="inst-plan">' +
       pkgs.map((it) => '<div class="inst-plan-row"><div><b>' + esc(it.name) + '</b> <em>' + esc(it.version) + '</em>' +
         '<span class="inst-arch">' + esc(it.arch || '') + '</span>' +
-        (it.dangerous ? '<span class="mk-badge warn">危险包</span>' : '') + '</div>' +
+        (it.dangerous ? '<span class="mk-risk">' + esc(pkgRisk(it.name) || '系统组件') + '</span>' : '') + '</div>' +
         '<div class="inst-reason">' + esc(it.isRoot ? '目标包' : (it.reason || '依赖')) + ' · ' + fmtBytes(it.size) + '</div></div>').join('') +
       '</div>';
     h += '<label class="mk-check mk-confirm"><input type="checkbox" id="mkConfirm"' + (mk.confirmed ? ' checked' : '') + '> 我已确认包名、来源仓库与安装顺序</label>';
     if (danger.length) {
-      h += '<label class="mk-check mk-confirm danger"><input type="checkbox" id="mkDanger"' + (mk.allowDangerous ? ' checked' : '') + '> ' +
-        '计划包含危险包（kmod / 内核 / 引导 / 基础系统），我了解风险并申请额外确认</label>';
+      h += '<div class="note bad">计划包含 ' + danger.length + ' 个系统组件（kmod / 内核 / 引导 / base-files / libc / apk / opkg），安装后可能导致设备无法启动。</div>';
     }
     if (fails.length) {
-      h += '<div class="note bad">存在 fail 项（如 overlay 空间不足），本轮禁止安装。</div>';
+      h += '<div class="note bad">存在 fail 项（如 overlay 空间不足），暂不能安装。</div>';
     }
-    const gate = mk.confirmed && (!danger.length || mk.allowDangerous) && !fails.length;
     h += '<div class="row-actions">' +
-      '<button type="button" class="btn primary" data-act="market-dryrun"' + (mk.starting ? ' disabled' : '') + '>执行 dry-run 预演（下载→校验→上传→simulate）</button>' +
-      '<button type="button" class="btn" disabled title="高级模式只做 dry-run；真实安装请使用上方精选插件">安装到设备（高级模式不可用）</button>' +
+      '<button type="button" class="btn" data-act="market-dryrun"' + (mk.starting ? ' disabled' : '') + '>先做 dry-run 预演（不写入）</button>' +
       '</div>';
-    if (!gate) h += '<div class="note">高级模式只执行 dry-run（下载→校验→上传→simulate）；真实安装请使用精选插件流程。</div>';
-    h += '<div class="note warn">安全边界：危险包默认不允许一键安装；overlay 空间不足会直接禁止；下载与上传均做 SHA256 校验。</div>';
+    h += marketInstallBox(pkgs, danger);
+    h += '<div class="note">下载与上传均做 SHA256 校验；安装前会自动做设备包与 init.d 快照。</div>';
     h += '</div>';
     return h;
   }
 
-  function marketCatalogItem() {
-    const mk = state.market;
-    const list = (mk.catalog && mk.catalog.plugins) || [];
-    return list.find((p) => p.id === mk.pluginId) || null;
+  function policyReady() {
+    const pol = state.market.policy;
+    return !!(pol && pol.configured && pol.matches && pol.allowOverlay && pol.allowTmp);
   }
 
-  async function loadPluginMarket(force) {
+  function marketInstallReady() {
     const mk = state.market;
-    if (mk.catalogLoading) return;
-    if (mk.catalog && !force) return;
-    if (!state.connected) { mk.catalogErr = '未连接设备：请先连接路由器'; renderMarket(); return; }
-    if (!state.api || !state.api.GetPluginMarket) {
-      mk.catalogErr = '运行时缺少 GetPluginMarket，请使用最新程序';
-      renderMarket();
-      return;
+    const host = (state.info && state.info.host) || '';
+    const view = mk.plan;
+    const pkgs = (view && view.plan && view.plan.packages) || [];
+    const danger = pkgs.some((p) => p.dangerous && !p.installed);
+    const fails = ((view && view.checks) || []).some((c) => c.level === 'fail');
+    const polDangerOK = !danger || !!(mk.policy && mk.policy.allowDangerous);
+    return !!(mk.selected && view && view.plan && !fails && policyReady() && polDangerOK && mk.confirmed &&
+      mk.confirmHost === host && mk.confirmA && mk.confirmB && (!danger || mk.allowDangerous));
+  }
+
+  function marketInstallBox(pkgs, danger) {
+    const mk = state.market;
+    const host = (state.info && state.info.host) || '';
+    const pol = mk.policy;
+    const pending = pkgs.filter((p) => !p.installed).length;
+    let h = '<div class="mk-confirm-box">' + sectionHead('check', '安装到设备', '确认后才会下载与写入');
+    h += '<div class="note warn">将向 <b class="mono">' + esc(host || '当前设备') + '</b> 写入 ' + pending +
+      ' 个包；安装前会做快照，失败时不会自动卸载已完成的包。</div>';
+    if (!policyReady()) {
+      h += '<div class="note bad">设备写入授权未开启：' + esc((pol && pol.error) || mk.policyErr || '未配置 device-write-allow.json') + '</div>';
+      h += '<div class="note">授权文件：<span class="mono">' + esc((pol && pol.path) || '') +
+        '</span><br>示例：<span class="mono">{"host":"' + esc(host || '设备地址') + '","allowOverlay":true,"allowTmp":true,"allowDangerous":' +
+        (danger.length ? 'true' : 'false') + '}</span></div>';
+    } else if (danger.length && !pol.allowDangerous) {
+      h += '<div class="note bad">授权文件未允许系统组件写入：请把 <span class="mono">"allowDangerous"</span> 设为 <span class="mono">true</span>。</div>';
     }
-    mk.catalogLoading = true;
-    mk.catalogErr = '';
+    h += '<label class="mk-label">逐字输入设备地址确认</label>';
+    h += '<input id="mkConfirmHost" class="input" spellcheck="false" placeholder="' + esc(host) + '" value="' + esc(mk.confirmHost) + '">';
+    h += '<label class="mk-check"><input type="checkbox" id="mkConfirmA"' + (mk.confirmA ? ' checked' : '') + '> 我确认写入设备</label>';
+    h += '<label class="mk-check"><input type="checkbox" id="mkConfirmB"' + (mk.confirmB ? ' checked' : '') + '> 我确认写入 overlay 与 /tmp</label>';
+    if (danger.length) {
+      h += '<label class="mk-check mk-confirm danger"><input type="checkbox" id="mkDangerInstall"' + (mk.allowDangerous ? ' checked' : '') +
+        '> 计划含系统组件，可能导致设备无法启动，我仍要继续</label>';
+    }
+    h += '<div class="row-actions"><button type="button" class="btn primary" data-act="market-install"' +
+      (marketInstallReady() ? '' : ' disabled') + '>' + (mk.starting ? '正在启动…' : '开始安装到设备') + '</button></div>';
+    h += '</div>';
+    return h;
+  }
+
+  function syncMarketInstall() {
+    const btn = document.querySelector('[data-act="market-install"]');
+    if (btn) btn.disabled = !marketInstallReady();
+  }
+
+  async function loadMarketPolicy() {
+    const mk = state.market;
+    if (!state.connected || !state.api || !state.api.GetDeviceWritePolicy) return;
+    try {
+      mk.policy = await state.api.GetDeviceWritePolicy();
+      mk.policyErr = '';
+    } catch (e) {
+      mk.policyErr = errText(e);
+    }
+    renderMarket();
+  }
+
+  async function installMarketSelected() {
+    const mk = state.market;
+    if (!marketInstallReady()) { toast('请先完成预检、设备地址与写入确认', 'error'); return; }
+    if (mk.starting) return;
+    const danger = ((mk.plan.plan && mk.plan.plan.packages) || []).some((p) => p.dangerous && !p.installed);
+    mk.starting = true;
+    mk.job = null;
+    mk.jobId = '';
     renderMarket();
     try {
-      mk.catalog = await state.api.GetPluginMarket();
+      const id = await state.api.StartInstallJob({
+        mode: 'feed',
+        package: mk.selected.name,
+        version: mk.selected.version,
+        localPath: '',
+        dryRun: false,
+        repos: marketRepoLines(),
+        commit: true,
+        confirmed: true,
+        allowDangerous: !!danger && mk.allowDangerous,
+        confirmWrites: true,
+        confirmText: mk.confirmHost,
+      });
+      mk.jobId = id;
+      pollMarketJob(id);
     } catch (e) {
-      mk.catalogErr = errText(e);
-    } finally {
-      mk.catalogLoading = false;
+      mk.starting = false;
+      toastError(e);
       renderMarket();
     }
-  }
-
-  function marketCuratedHtml() {
-    const mk = state.market;
-    const limits = (mk.catalog && mk.catalog.limits) || {};
-    const maxPkg = instBytes(limits.maxPkgInstall || 0);
-    const maxTotal = instBytes(limits.maxTotalInstall || 0);
-    let h = sectionHead('plug', '精选插件', '内置 noarch 清单 · 版本/依赖/体积实时解析');
-    h += '<div class="note">只提供 noarch 脚本/LuCI 插件。kmod、编译型二进制、单包安装超过 ' + esc(maxPkg) +
-      ' 或整单超过 ' + esc(maxTotal) + ' 的插件不提供安装入口；版本、依赖与体积在预演时从路由器包源解析。</div>';
-    h += '<div class="row-actions"><button type="button" class="btn mini" data-act="market-refresh"' +
-      (mk.catalogLoading ? ' disabled' : '') + '>' + (mk.catalogLoading ? '读取中…' : '刷新设备状态') + '</button></div>';
-
-    if (mk.catalogErr) h += '<div class="note bad">' + esc(mk.catalogErr) + '</div>';
-    if (mk.catalogLoading && !mk.catalog) {
-      h += '<div class="empty">正在读取设备包环境…</div>';
-      return h;
-    }
-    if (!mk.catalog) return h;
-
-    if (!mk.catalog.connected) {
-      h += '<div class="note bad">' + esc(mk.catalog.note || '未连接设备') + '</div>';
-    } else {
-      h += '<div class="inst-env">' +
-        instChip('包管理器', mk.catalog.manager || '—', mk.catalog.manager ? 'ok' : 'bad') +
-        instChip('架构', mk.catalog.arch || '—', 'ok') +
-        instChip('已装包', String(mk.catalog.installed || 0), 'ok') +
-        instChip('overlay 可用', instBytes((mk.catalog.overlayKb || 0) * 1024), (mk.catalog.overlayKb || 0) > 0 ? 'ok' : 'warn') +
-        '</div>';
-      if (mk.catalog.note) h += '<div class="note">' + esc(mk.catalog.note) + '</div>';
-    }
-
-    const pol = mk.catalog.policy;
-    if (pol && (!pol.configured || !pol.matches)) {
-      h += '<div class="note warn">设备写入授权未开启：' + esc(pol.error || '未配置授权文件') +
-        '<br>授权文件：<span class="mono">' + esc(pol.path || '') + '</span>' +
-        '<br>示例：<span class="mono">{"host":"' + esc(mk.catalog.host || '设备地址') + '","allowOverlay":true,"allowTmp":true,"allowDangerous":false}</span></div>';
-    }
-
-    const list = mk.catalog.plugins || [];
-    const rows = list.map((p) => {
-      const sel = p.id === mk.pluginId ? ' selected' : '';
-      return '<button type="button" class="mk-plugin' + sel + '" data-act="market-plugin" data-id="' + esc(p.id) + '">' +
-        '<span class="mk-plugin-head"><b>' + esc(p.title) + '</b><span class="tag">' + esc(p.category) + '</span>' +
-        (p.installed ? '<span class="mk-badge on">已安装</span>' : '') + '</span>' +
-        '<span class="mk-plugin-name mono">' + esc(p.package) + '</span>' +
-        '<span class="mk-plugin-desc">' + esc(p.description) + '</span>' +
-        '</button>';
-    }).join('');
-    h += '<div class="mk-plugins">' + (rows || '<div class="empty">目录为空</div>') + '</div>';
-    h += marketPluginDetailHtml();
-    return h;
   }
 
   function selectMarketPkg(name, version) {
@@ -2439,6 +2329,9 @@
     mk.planErr = '';
     mk.confirmed = false;
     mk.allowDangerous = false;
+    mk.confirmHost = '';
+    mk.confirmA = false;
+    mk.confirmB = false;
     renderMarket();
   }
 
@@ -2467,6 +2360,9 @@
       mk.plan = null;
       mk.confirmed = false;
       mk.allowDangerous = false;
+      mk.confirmHost = '';
+      mk.confirmA = false;
+      mk.confirmB = false;
       if (view && !view.total) mk.indexErr = '所有仓库都没有解析到包，请检查地址是否指向 feed 根目录（失败详情见上方）。';
     } catch (e) {
       mk.indexErr = errText(e);
@@ -2513,7 +2409,6 @@
     mk.starting = true;
     mk.job = null;
     mk.jobId = '';
-    mk.jobKind = 'advanced';
     renderMarket();
     try {
       const id = await state.api.StartInstallJob({
@@ -2543,11 +2438,19 @@
       const job = await state.api.GetInstallJob(id);
       mk.job = job;
       mk.starting = false;
+      if (job && !job.running && job.result && job.result.success && job.result.code !== 'DRY_RUN_OK') {
+        const done = (job.plan && job.plan.packages) || [];
+        done.forEach((it) => {
+          const q = ((mk.index && mk.index.packages) || []).find((x) => x.name === it.name);
+          if (q) { q.installed = true; q.installedVersion = it.version; }
+        });
+        mk.confirmHost = '';
+        mk.confirmA = false;
+        mk.confirmB = false;
+      }
       renderMarket();
       if (job && job.running) {
         mk.pollTimer = setTimeout(() => pollMarketJob(id), 800);
-      } else if (mk.jobKind === 'market' && job && !job.dryRun && job.result && job.result.success) {
-        loadPluginMarket(true);
       }
     } catch (e) {
       mk.starting = false;
@@ -3256,21 +3159,6 @@
       arm(btn, '卸载', () => unmountStorage(dev));
       return;
     }
-    if (act === 'market-refresh') { await loadPluginMarket(true); return; }
-    if (act === 'market-plugin') {
-      state.market.pluginId = btn.dataset.id || '';
-      state.market.job = null;
-      state.market.jobId = '';
-      state.market.jobKind = '';
-      state.market.confirmHost = '';
-      state.market.confirmA = false;
-      state.market.confirmB = false;
-      renderMarket();
-      return;
-    }
-    if (act === 'market-preview') { await startMarketPreview(); return; }
-    if (act === 'market-commit') { await commitMarketInstall(); return; }
-
     if (act === 'market-device-repos') {
       if (!state.connected) { toast('未连接设备：请手动填写仓库地址', 'info'); return; }
       try {
@@ -3312,6 +3200,7 @@
     }
     if (act === 'market-plan') { await resolveMarketPlan(); return; }
     if (act === 'market-dryrun') { await startMarketJob(); return; }
+    if (act === 'market-install') { await installMarketSelected(); return; }
     if (act === 'market-cancel') {
       try {
         if (state.market.jobId) await state.api.CancelInstallJob(state.market.jobId);
@@ -3776,8 +3665,34 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && state.connected) startPolling();
     });
-    $('#closeBtn').addEventListener('click', () => { if (state.api) state.api.CloseApp(); });
-    $('#connectCloseBtn').addEventListener('click', () => { if (state.api) state.api.CloseApp(); });
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-win]');
+      if (!b || !state.api) return;
+      const act = b.dataset.win;
+      if (act === 'min') state.api.WindowMinimise();
+      else if (act === 'max') {
+        state.api.WindowToggleMaximise();
+        setTimeout(syncWinMax, 80);
+      } else if (act === 'close') state.api.CloseApp();
+    });
+
+    document.querySelectorAll('.topbar, .dragbar').forEach((el) => {
+      el.addEventListener('dblclick', (e) => {
+        if (e.target.closest('button, input, select, textarea, a')) return;
+        if (!state.api || !state.api.WindowToggleMaximise) return;
+        state.api.WindowToggleMaximise();
+        setTimeout(syncWinMax, 80);
+      });
+    });
+
+    async function syncWinMax() {
+      if (!state.api || !state.api.WindowIsMaximised) return;
+      try {
+        document.body.classList.toggle('win-max', !!await state.api.WindowIsMaximised());
+      } catch (e) {}
+    }
+    window.addEventListener('resize', syncWinMax);
+    syncWinMax();
     $('#pinBtn').addEventListener('click', async () => {
       state.pinned = !state.pinned;
       try {
@@ -3800,7 +3715,7 @@
       state.labTab = b.dataset.labtab;
       renderLab();
       if (state.labTab === 'tools') fetchLab();
-      else if (state.labTab === 'market') { ensureMarketRepos(); loadPluginMarket(false); ensureMarketIndex(); }
+      else if (state.labTab === 'market') { ensureMarketRepos(); ensureMarketIndex(); loadMarketPolicy(); }
       else fetchConsole();
     }));
     const offlineMarketBtn = $('#offlineMarketBtn');
@@ -3899,7 +3814,6 @@
       const d = e.target && e.target.closest ? e.target.closest('details[data-mkdetail]') : null;
       if (!d) return;
       if (d.dataset.mkdetail === 'repo') state.market.repoOpen = d.open;
-      if (d.dataset.mkdetail === 'curated') state.market.curatedOpen = d.open;
     }, true);
 
     $('#labContent').addEventListener('change', (e) => {
@@ -3923,17 +3837,17 @@
         state.market.confirmed = !!e.target.checked;
         renderMarket();
       }
-      if (e.target.id === 'mkDanger') {
+      if (e.target.id === 'mkDangerInstall') {
         state.market.allowDangerous = !!e.target.checked;
-        renderMarket();
+        syncMarketInstall();
       }
       if (e.target.id === 'mkConfirmA') {
         state.market.confirmA = !!e.target.checked;
-        syncMarketCommit();
+        syncMarketInstall();
       }
       if (e.target.id === 'mkConfirmB') {
         state.market.confirmB = !!e.target.checked;
-        syncMarketCommit();
+        syncMarketInstall();
       }
     });
 
@@ -3953,7 +3867,7 @@
     $('#labContent').addEventListener('input', (e) => {
       if (e.target.id === 'mkConfirmHost') {
         state.market.confirmHost = e.target.value.trim();
-        syncMarketCommit();
+        syncMarketInstall();
         return;
       }
       if (e.target.id === 'mkRepos') {
@@ -4006,7 +3920,11 @@
 
   /* ================= init ================= */
   async function init() {
-    if (MOCK) document.documentElement.classList.add('preview');
+    if (MOCK) {
+      if (new URLSearchParams(location.search).get('preview') !== '0') {
+        document.documentElement.classList.add('preview');
+      }
+    }
     let theme = 'dark';
     try { theme = localStorage.getItem('prolite-theme') || 'dark'; } catch (e) {}
     applyTheme(theme);
@@ -4043,6 +3961,9 @@
         const labtab = new URLSearchParams(location.search).get('lab');
         const focus = new URLSearchParams(location.search).get('focus');
         if (labtab) setTimeout(() => openLab(focus ? 'acc-' + focus : null, labtab), 700);
+        if (new URLSearchParams(location.search).get('market') === '1') {
+          setTimeout(() => openLab(null, 'market'), 700);
+        }
       } else if (cfg.saved && cfg.auth !== 'password') {
         doConnect();
       }

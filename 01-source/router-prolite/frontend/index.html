@@ -24,6 +24,9 @@
     <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6z"/><path d="M12 15v5"/></symbol>
     <symbol id="i-pin-off" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2h-5"/><path d="M6 21l6-6"/><path d="M3 3l18 18"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><rect x="7" y="4" width="13" height="13" rx="1.5"/><path d="M4 8v10.5A1.5 1.5 0 0 0 5.5 20H17"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7"/><path d="M20 5v6h-6"/></symbol>
@@ -69,7 +72,14 @@
         <button type="button" class="icon-btn" id="connectThemeBtn" title="切换主题">
           <svg class="i"><use href="#i-moon"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="connectCloseBtn" title="关闭">
+        <button type="button" class="icon-btn" data-win="min" title="最小化">
+          <svg class="i"><use href="#i-min"/></svg>
+        </button>
+        <button type="button" class="icon-btn win-max" data-win="max" title="最大化">
+          <svg class="i ico-max"><use href="#i-max"/></svg>
+          <svg class="i ico-restore"><use href="#i-restore"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="connectCloseBtn" data-win="close" title="关闭">
           <svg class="i"><use href="#i-close"/></svg>
         </button>
       </div>
@@ -194,7 +204,14 @@
         <button type="button" class="icon-btn" id="pinBtn" title="窗口置顶">
           <svg class="i"><use href="#i-pin"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="closeBtn" title="关闭">
+        <button type="button" class="icon-btn" data-win="min" title="最小化">
+          <svg class="i"><use href="#i-min"/></svg>
+        </button>
+        <button type="button" class="icon-btn win-max" data-win="max" title="最大化">
+          <svg class="i ico-max"><use href="#i-max"/></svg>
+          <svg class="i ico-restore"><use href="#i-restore"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="closeBtn" data-win="close" title="关闭">
           <svg class="i"><use href="#i-close"/></svg>
         </button>
       </div>
@@ -287,6 +304,16 @@
       </div>
       <div class="top-actions" style="--wails-draggable:no-drag">
         <button type="button" class="btn mini ghost" id="cellRefresh">刷新</button>
+        <button type="button" class="icon-btn" data-win="min" title="最小化">
+          <svg class="i"><use href="#i-min"/></svg>
+        </button>
+        <button type="button" class="icon-btn win-max" data-win="max" title="最大化">
+          <svg class="i ico-max"><use href="#i-max"/></svg>
+          <svg class="i ico-restore"><use href="#i-restore"/></svg>
+        </button>
+        <button type="button" class="icon-btn" data-win="close" title="关闭">
+          <svg class="i"><use href="#i-close"/></svg>
+        </button>
       </div>
     </header>
     <main class="main-scroll cell-scroll" id="cellScroll">
@@ -310,6 +337,16 @@
         </button>
         <button type="button" class="icon-btn" id="labDisconnectBtn" title="断开连接">
           <svg class="i"><use href="#i-power"/></svg>
+        </button>
+        <button type="button" class="icon-btn" data-win="min" title="最小化">
+          <svg class="i"><use href="#i-min"/></svg>
+        </button>
+        <button type="button" class="icon-btn win-max" data-win="max" title="最大化">
+          <svg class="i ico-max"><use href="#i-max"/></svg>
+          <svg class="i ico-restore"><use href="#i-restore"/></svg>
+        </button>
+        <button type="button" class="icon-btn" data-win="close" title="关闭">
+          <svg class="i"><use href="#i-close"/></svg>
         </button>
       </div>
     </header>

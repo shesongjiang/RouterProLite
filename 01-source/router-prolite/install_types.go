@@ -52,7 +52,6 @@ type InstallRequest struct {
 	Package        string   `json:"package"`
 	Version        string   `json:"version"`
 	LocalPath      string   `json:"localPath"`
-	MarketID       string   `json:"marketId"` // 非空 = 插件市场条目，只允许市场内包真实安装
 	DryRun         bool     `json:"dryRun"`
 	Repos          []string `json:"repos"`          // 可用自定义仓库覆盖设备源
 	Commit         bool     `json:"commit"`         // true = 真实安装

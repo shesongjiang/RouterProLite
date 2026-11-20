@@ -1,12 +1,15 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestDangerousPackagesHardBlocked(t *testing.T) {
+func TestDangerousPackagesRequireConfirm(t *testing.T) {
 	cases := []string{"libc", "base-files", "kernel", "kmod-tun", "apk", "opkg", "uboot-envtools", "linux-6.6"}
 	for _, name := range cases {
 		if !dangerousPackage(name) {
-			t.Fatalf("%s 应被判定为危险包", name)
+			t.Fatalf("%s 应被判定为系统组件", name)
 		}
 	}
 
@@ -16,14 +19,17 @@ func TestDangerousPackagesHardBlocked(t *testing.T) {
 	checks := preflightPlan(plan, &PkgEnv{Manager: "apk", Arch: "mipsel_24kc"})
 	found := false
 	for _, c := range checks {
-		if c.ID == "DANGER_FORBIDDEN" && c.Level == "fail" {
+		if strings.HasPrefix(c.ID, "DANGER-REVIEW-") && c.Level == "warn" {
 			found = true
+		}
+		if c.Level == "fail" && strings.HasPrefix(c.ID, "DANGER") {
+			t.Fatalf("系统组件不应再被硬性拒绝：%s %s", c.ID, c.Detail)
 		}
 	}
 	if !found {
-		t.Fatal("危险包必须产生 DANGER_FORBIDDEN fail，任何确认都不能绕过")
+		t.Fatal("系统组件必须产生 warn 提示，要求二次确认")
 	}
 	if !plan.Packages[0].Dangerous {
-		t.Fatal("危险包计划项应标记 dangerous=true")
+		t.Fatal("系统组件计划项应标记 dangerous=true")
 	}
 }
