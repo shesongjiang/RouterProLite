@@ -1256,7 +1256,7 @@ input::placeholder { color: var(--text-tertiary); opacity: .75; }
   border-radius: 8px;
   background: var(--bg-surface);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: .02em;
   display: inline-flex;
@@ -1857,7 +1857,7 @@ input::placeholder { color: var(--text-tertiary); opacity: .75; }
     scrollbar-width: thin;
     scrollbar-color: color-mix(in srgb, var(--text-tertiary) 55%, transparent) transparent;
   }
-  .lab-tabs button { flex: 0 0 auto; min-width: 92px; height: 28px; padding: 0 9px; font-size: 9.5px; }
+  .lab-tabs button { flex: 0 0 auto; min-width: 92px; height: 28px; padding: 0 9px; font-size: 11px; white-space: nowrap; }
   .topbar, .dragbar { padding-left: 9px; padding-right: 5px; gap: 5px; }
   .top-left { gap: 5px; }
   .host-name { max-width: 84px; }
@@ -1894,11 +1894,12 @@ input::placeholder { color: var(--text-tertiary); opacity: .75; }
   .inst-check em, .mk-origin, .mk-zh { overflow-wrap: anywhere; }
 }
 
-/* 520 附近：顶部三个标签收成图标，避免文字挤压 */
+/* 520 附近：保持文字标签，只收紧字号与内边距，绝不退化成图标 */
 @media (max-width: 560px) {
+  .lab-tabs { gap: 4px; padding: 5px 6px; overflow-x: visible; }
   .lab-tabs button {
-    flex: 1 1 0; min-width: 0; gap: 0; font-size: 0;
-    justify-content: center;
+    flex: 1 1 0; min-width: 0; gap: 4px;
+    padding: 0 4px; font-size: 11px; white-space: nowrap;
   }
-  .lab-tabs button .i { width: 15px; height: 15px; }
+  .lab-tabs button .i { width: 11px; height: 11px; flex: 0 0 auto; }
 }
