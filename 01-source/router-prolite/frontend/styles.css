@@ -1893,3 +1893,12 @@ input::placeholder { color: var(--text-tertiary); opacity: .75; }
   .mk-plan, .mk-detail { min-width: 0; }
   .inst-check em, .mk-origin, .mk-zh { overflow-wrap: anywhere; }
 }
+
+/* 520 附近：顶部三个标签收成图标，避免文字挤压 */
+@media (max-width: 560px) {
+  .lab-tabs button {
+    flex: 1 1 0; min-width: 0; gap: 0; font-size: 0;
+    justify-content: center;
+  }
+  .lab-tabs button .i { width: 15px; height: 15px; }
+}
