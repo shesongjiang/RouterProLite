@@ -4,18 +4,22 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 )
 
 type savedConfig struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	User        string `json:"user"`
-	Auth        string `json:"auth"`
-	KeyPath     string `json:"keyPath"`
-	Pinned      bool   `json:"pinned"`
-	Fingerprint string `json:"fingerprint"`
-	Saved       bool   `json:"saved"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	User    string `json:"user"`
+	Auth    string `json:"auth"`
+	KeyPath string `json:"keyPath"`
+	Pinned  bool   `json:"pinned"`
+	// Fingerprint 是旧版的单设备全局指纹，仅作为迁移读取的回退，不再写入。
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Fingerprints 按 "host:port" 分别保存每台设备的 TOFU 指纹，多台设备互不干扰。
+	Fingerprints map[string]string `json:"fingerprints,omitempty"`
+	Saved        bool              `json:"saved"`
 }
 
 func defaultConfig() savedConfig {
@@ -53,6 +57,9 @@ func (c *configStore) Load() savedConfig {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return defaultConfig()
 	}
+	if cfg.Fingerprints == nil {
+		cfg.Fingerprints = map[string]string{}
+	}
 	if cfg.Host == "" {
 		cfg.Host = "192.168.100.1"
 	}
@@ -85,4 +92,34 @@ func (c *configStore) Save(cfg savedConfig) error {
 
 func (c *configStore) Dir() string {
 	return filepath.Dir(c.path)
+}
+
+func fpKey(host string, port int) string {
+	return host + ":" + strconv.Itoa(port)
+}
+
+// fingerprintFor 返回指定设备的固定指纹；旧版单值指纹只对配置里保存的主机生效，
+// 避免把 A 设备的指纹误用到 B 设备上。
+func (c *savedConfig) fingerprintFor(host string, port int) string {
+	if c.Fingerprints == nil {
+		c.Fingerprints = map[string]string{}
+	}
+	if fp, ok := c.Fingerprints[fpKey(host, port)]; ok && fp != "" {
+		return fp
+	}
+	if c.Fingerprint != "" && host == c.Host && port == c.Port {
+		return c.Fingerprint
+	}
+	return ""
+}
+
+func (c *savedConfig) setFingerprint(host string, port int, fp string) {
+	if c.Fingerprints == nil {
+		c.Fingerprints = map[string]string{}
+	}
+	if fp == "" {
+		delete(c.Fingerprints, fpKey(host, port))
+		return
+	}
+	c.Fingerprints[fpKey(host, port)] = fp
 }

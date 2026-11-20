@@ -539,7 +539,11 @@ func (r *Router) ReloadNetwork() error {
 }
 
 func (r *Router) Reboot() error {
-	_, _, _ = r.runRaw("reboot", 6*time.Second)
+	out, code, err := r.runRaw("reboot", 6*time.Second)
+	// reboot 正常会让 SSH 连接直接断开并返回连接错误，这里只上报能确认的执行失败
+	if err == nil && code != 0 {
+		return fmt.Errorf("重启命令失败（退出码 %d）：%s", code, strings.TrimSpace(out))
+	}
 	return nil
 }
 

@@ -656,17 +656,23 @@ func parseUPnP(meta *Meta, raw, raw2 string) (bool, bool, bool, string, string) 
 		running := meta.Running["miniupnpd"] || meta.Running["upnpd"]
 		return installed, running, false, "", ""
 	}
+	// 按段 ID 排序后取第一个带 enabled 的段，避免 map 随机遍历导致结果不稳定
+	ids := make([]string, 0, len(cfg))
+	for id := range cfg {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	enabled := false
 	sectionID := ""
-	for id, sec := range cfg {
-		if v, ok := sec["enabled"]; ok {
+	for _, id := range ids {
+		if v, ok := cfg[id]["enabled"]; ok {
 			enabled = asString(v) != "0"
 			sectionID = id
 			break
 		}
-		if sectionID == "" {
-			sectionID = id
-		}
+	}
+	if sectionID == "" && len(ids) > 0 {
+		sectionID = ids[0]
 	}
 	running := meta.Running["miniupnpd"] || meta.Running["upnpd"]
 	installed := true
@@ -833,11 +839,11 @@ func parseConsole(out string, meta *Meta) *ConsoleData {
 
 	c.Processes = parseProcessList(s["PS"])
 
-	tmp := &Meta{}
-	tmp.parseModem(s)
-	c.Modem = tmp.Modem
-	attachModemInterface(c, s["ADDR"], counters)
+	// 复用 meta（含 Init/UCI），避免空 Meta 丢失 qmodem 已安装状态
 	mcopy := *meta
+	mcopy.parseModem(s)
+	c.Modem = mcopy.Modem
+	attachModemInterface(c, s["ADDR"], counters)
 	mcopy.parseMwan(s["MWAN"])
 	c.Mwan = mcopy.Mwan
 

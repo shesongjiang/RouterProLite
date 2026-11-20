@@ -255,7 +255,8 @@
       'SetDHCPPool', 'SetUPnP', 'InterfaceAction', 'ReloadService',
       'GetPkgEnv', 'InspectLocalPackage', 'PickPackageFile', 'StartInstallJob',
       'CancelInstallJob', 'GetInstallJob', 'GetMarketRepos', 'GetMarketIndex', 'ResolvePlan',
-      'GetDeviceWritePolicy',
+      'GetDeviceWritePolicy', 'GetStorageDevices', 'MountStorage', 'UnmountStorage',
+      'CleanupInstallJob',
     ];
     const api = {};
     names.forEach((n) => { api[n] = call(n); });
@@ -1531,6 +1532,11 @@
     if (state.labTab === 'market') { ensureMarketRepos(); ensureMarketIndex(); loadMarketPolicy(); return; }
     if (state.labTab === 'tools') await fetchLab();
     else await fetchConsole();
+    // 深链接（?console=storage）或直接打开控制台时 state.cTab 已是 storage，
+    // setConsoleTab 的早返回不会触发拉取，这里补一次。
+    if (state.labTab === 'console' && state.cTab === 'storage' && !state.storage.view && !state.storage.loading) {
+      fetchStorage();
+    }
     if (focus) scrollLab(focus);
   }
 
@@ -2321,7 +2327,7 @@
     const fails = checks.filter((c) => c.level === 'fail');
     const warns = checks.filter((c) => c.level === 'warn');
     const pkgs = (plan && plan.packages) || [];
-    const danger = pkgs.filter((p) => p.dangerous);
+    const danger = mode === 'device' ? (view.dangerous || []) : pkgs.filter((p) => p.dangerous);
     const sub = mode === 'device'
       ? '设备侧 simulate · 不写入'
       : (pkgs.length + ' 个包 · 下载 ' + instBytes(plan.totalSize) + ' · 安装后 ' + instBytes(plan.totalInstall));
@@ -2348,7 +2354,8 @@
       h += '<div class="inst-title">设备侧 simulate 输出</div><pre class="term">' + esc(view.simulate) + '</pre>';
     }
     if (mode === 'device') {
-      h += '<div class="note">设备侧解析：依赖与 kmod 由设备 apk 按当前内核哈希决定，上面的 simulate 就是完整预演；安装时不再由 PC 下载依赖闭包。</div>';
+      h += '<div class="note">设备侧解析：依赖与 kmod 由设备 apk 按当前内核哈希决定，上面的 simulate 就是完整预演；安装时不再由 PC 下载依赖闭包。' +
+        '依赖来自设备自身 /etc/apk/repositories——若上方仓库是手动填写且设备未配置同一源，设备可能提示找不到该包。</div>';
     } else if (pkgs.length) {
       h += '<div class="inst-title">依赖树（先依赖，后被依赖）</div><div class="inst-plan">' +
         pkgs.map((it) => '<div class="inst-plan-row"><div><b>' + esc(it.name) + '</b> <em>' + esc(it.version) + '</em>' +
@@ -2378,6 +2385,15 @@
     return h;
   }
 
+  // planDangerNames 返回当前预检计划里的系统组件名单：
+  // 设备侧解析取后端从包名 + simulate 输出汇总的 dangerous 列表；本机闭包取计划项标记。
+  function planDangerNames(mk) {
+    const view = mk && mk.plan;
+    if (!view) return [];
+    if (view.resolveMode === 'device') return view.dangerous || [];
+    return ((view.plan && view.plan.packages) || []).filter((p) => p.dangerous && !p.installed);
+  }
+
   function policyReady() {
     const pol = state.market.policy;
     return !!(pol && pol.configured && pol.matches && pol.allowOverlay && pol.allowTmp);
@@ -2387,8 +2403,7 @@
     const mk = state.market;
     const host = (state.info && state.info.host) || '';
     const view = mk.plan;
-    const pkgs = (view && view.plan && view.plan.packages) || [];
-    const danger = pkgs.some((p) => p.dangerous && !p.installed);
+    const danger = planDangerNames(mk).length > 0;
     const fails = ((view && view.checks) || []).some((c) => c.level === 'fail');
     const polDangerOK = !danger || !!(mk.policy && mk.policy.allowDangerous);
     return !!(mk.selected && view && !view.blocked && !fails && policyReady() && polDangerOK && mk.confirmed &&
@@ -2399,7 +2414,7 @@
     const mk = state.market;
     const host = (state.info && state.info.host) || '';
     const pol = mk.policy;
-    const pending = pkgs.filter((p) => !p.installed).length;
+    const pending = mode === 'device' ? 1 : pkgs.filter((p) => !p.installed).length;
     let h = '<div class="mk-confirm-box">' + sectionHead('check', '安装到设备',
       mode === 'device' ? '确认后由设备下载并写入' : '确认后才会下载与写入');
     h += '<div class="note warn">将向 <b class="mono">' + esc(host || '当前设备') + '</b> 写入 ' + pending +
@@ -2447,7 +2462,7 @@
     const mk = state.market;
     if (!marketInstallReady()) { toast('请先完成预检、设备地址与写入确认', 'error'); return; }
     if (mk.starting) return;
-    const danger = ((mk.plan.plan && mk.plan.plan.packages) || []).some((p) => p.dangerous && !p.installed);
+    const danger = planDangerNames(mk).length > 0;
     mk.starting = true;
     mk.job = null;
     mk.jobId = '';
@@ -3784,7 +3799,6 @@
     state.expandedMac = '';
     state.tileSig = '';
     state.clientSig = '';
-    state.pinned = state.pinned;
     const topo = $('#topoWrap');
     if (topo) { topo.dataset.sig = ''; topo.innerHTML = ''; }
     $('#mainView').classList.add('hidden');
@@ -3801,24 +3815,26 @@
       clearInterval(btn._armTimer);
       btn.dataset.armed = '';
       btn.classList.remove('armed');
-      btn.textContent = label;
+      btn.innerHTML = btn._armHTML || '';
       fn();
       return;
     }
+    // 保存原始内容（可能含 SVG 图标），倒计时后完整还原，避免图标被 textContent 覆盖丢失
+    btn._armHTML = btn.innerHTML;
     btn.dataset.armed = '1';
     btn.classList.add('armed');
     let left = 3;
-    btn.textContent = '确认 ' + left;
+    btn.innerHTML = '确认 ' + left;
     btn._armTimer = setInterval(() => {
       left -= 1;
       if (left <= 0) {
         clearInterval(btn._armTimer);
         btn.dataset.armed = '';
         btn.classList.remove('armed');
-        btn.textContent = label;
+        btn.innerHTML = btn._armHTML || '';
         return;
       }
-      btn.textContent = '确认 ' + left;
+      btn.innerHTML = '确认 ' + left;
     }, 1000);
   }
 

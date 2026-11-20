@@ -196,11 +196,18 @@ func parseWAN(out, addrOut, routeOut string) (ubusWANStatus, string, string) {
 				continue
 			}
 			iface := strings.TrimSuffix(fields[1], ":")
+			if iface == "lo" || iface == "sit0" {
+				continue
+			}
 			if dev != "" && iface != dev {
 				continue
 			}
+			cand := strings.Split(fields[3], "/")[0]
+			if pip := net.ParseIP(cand); pip != nil && pip.IsLoopback() {
+				continue
+			}
 			if ip == "" {
-				ip = strings.Split(fields[3], "/")[0]
+				ip = cand
 			}
 		}
 	}

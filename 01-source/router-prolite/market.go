@@ -72,6 +72,9 @@ type MarketPlanView struct {
 	Simulate      string       `json:"simulate"`    // 设备侧 simulate 输出
 	Blocked       bool         `json:"blocked"`     // 本机闭包模式拒绝内核相关包
 	BlockedReason string       `json:"blockedReason"`
+	// Dangerous 是设备侧解析模式下从包名 + simulate 输出汇总的系统组件名单，
+	// 供前端展示额外二次确认（本机闭包模式使用 Plan 里的 Dangerous 标记）。
+	Dangerous []string `json:"dangerous"`
 }
 
 // GetMarketRepos 返回设备只读带出的仓库；未连接时返回空列表与提示，不报错。
@@ -241,6 +244,12 @@ func (a *App) ResolvePlan(req MarketResolveRequest) (*MarketPlanView, error) {
 				Detail: firstNonEmpty(tailText(out, 400), "simulate 通过")},
 			Check{ID: "DEV-MODE", Stage: "index", Label: "依赖解析方式", Level: "ok",
 				Detail: "设备侧解析：依赖与 kmod 由设备 apk 决定，完整预演输出见下方"})
+		view.Dangerous = deviceDangerNames(pkg, out)
+		if len(view.Dangerous) > 0 {
+			view.Checks = append(view.Checks, Check{ID: "DEV-DANGER", Stage: "A", Label: "系统组件",
+				Level: "warn", Detail: "设备侧计划包含：" + strings.Join(view.Dangerous, "、") +
+					"；安装后可能导致设备无法启动，需授权文件 allowDangerous=true 并在界面单独勾选"})
+		}
 		return view, nil
 	}
 
@@ -273,6 +282,25 @@ func (a *App) ResolvePlan(req MarketResolveRequest) (*MarketPlanView, error) {
 // parseRepoFeeds 解析用户输入的仓库地址：每行一个 URL，也接受 opkg 的 src/gz 行与 @tag URL。
 func parseRepoFeeds(lines []string) []Feed {
 	return parseRepoFeedsForArch(lines, "")
+}
+
+// deviceDangerNames 汇总设备侧解析里的系统组件：根包名 + simulate 输出中出现的危险包名。
+func deviceDangerNames(pkg, simOut string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	add := func(n string) {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] || !dangerousPackage(n) {
+			return
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	add(pkg)
+	for _, n := range dangerousNamesInText(simOut) {
+		add(n)
+	}
+	return out
 }
 
 // parseRepoFeedsForArch 额外展开 $arch / ${arch}，并保留显式的 packages.adb 地址。

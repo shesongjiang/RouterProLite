@@ -267,11 +267,6 @@ func parseMetaOutput(out string) *Meta {
 			m.Running[name] = running
 		}
 	}
-	for _, name := range []string{"AdGuardHome", "adguardhome", "https-dns-proxy", "passwall", "shellcrash", "openclash", "clash"} {
-		if v, ok := m.Running[name]; ok {
-			m.Running[name] = v
-		}
-	}
 
 	m.UCI["dhcp"] = parseUCI(s["UCI_DHCP"])
 	m.UCI["firewall"] = parseUCI(s["UCI_FW"])

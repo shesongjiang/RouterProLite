@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -246,7 +247,12 @@ func capOutput(s string) string {
 	if len(s) <= maxOutput {
 		return s
 	}
-	return s[:maxOutput] + "\n... (输出已截断)"
+	cut := s[:maxOutput]
+	// 回退到完整的 UTF-8 边界，避免把多字节中文截成乱码
+	for i := 0; i < 4 && len(cut) > 0 && !utf8.ValidString(cut); i++ {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "\n... (输出已截断)"
 }
 
 func (r *Router) fetchMeta() (*Meta, error) {
@@ -444,10 +450,17 @@ func (r *Router) ensureClient() (*ssh.Client, error) {
 	r.prevCPUTime = time.Time{}
 	r.prevNet = map[string]netCounter{}
 	r.prevNetTime = time.Time{}
+	if r.stopLatency != nil {
+		close(r.stopLatency)
+	}
+	stop := make(chan struct{})
+	r.stopLatency = stop
 	r.mu.Unlock()
 	if oldClient != nil && oldClient != client {
 		_ = oldClient.Close()
 	}
+	// 自动重连成功后重启延迟探测，否则主面板延迟会一直显示 "--" 直到手动重连
+	go r.latencyLoop(stop)
 	return client, nil
 }
 

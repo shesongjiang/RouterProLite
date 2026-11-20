@@ -58,7 +58,7 @@ func (a *App) GetConfig() ConfigView {
 		User:        cfg.User,
 		Auth:        cfg.Auth,
 		KeyPath:     cfg.KeyPath,
-		Fingerprint: cfg.Fingerprint,
+		Fingerprint: cfg.fingerprintFor(cfg.Host, cfg.Port),
 		Pinned:      cfg.Pinned,
 		Platform:    stdruntime.GOOS,
 		Version:     appVersion,
@@ -67,7 +67,14 @@ func (a *App) GetConfig() ConfigView {
 
 func (a *App) Connect(in ConnectionInput) (*ConnectionInfo, error) {
 	cfg := a.store.Load()
-	info, err := a.router.Connect(in, cfg.Fingerprint)
+	// 与 normalizeConnection 保持一致地归一化，避免端口为 0 或主机带空格时查不到已保存的指纹
+	lookupHost := strings.TrimSpace(in.Host)
+	lookupPort := in.Port
+	if lookupPort == 0 {
+		lookupPort = 22
+	}
+	pinned := cfg.fingerprintFor(lookupHost, lookupPort)
+	info, err := a.router.Connect(in, pinned)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +86,13 @@ func (a *App) Connect(in ConnectionInput) (*ConnectionInfo, error) {
 		cfg.KeyPath = in.KeyPath
 		cfg.Saved = true
 	}
-	cfg.Fingerprint = info.Fingerprint
+	// 指纹按设备分别保存；旧版单值指纹迁移到对应设备后即不再使用
+	if info.Fingerprint != "" {
+		cfg.setFingerprint(info.Host, info.Port, info.Fingerprint)
+		if cfg.Fingerprint != "" && cfg.fingerprintFor(info.Host, info.Port) == cfg.Fingerprint {
+			cfg.Fingerprint = ""
+		}
+	}
 	if err := a.store.Save(cfg); err != nil {
 		return info, fmt.Errorf("连接成功，但保存配置失败：%w", err)
 	}
@@ -183,6 +196,7 @@ func (a *App) PickKeyFile() (string, error) {
 
 func (a *App) ResetFingerprint() error {
 	cfg := a.store.Load()
+	cfg.setFingerprint(cfg.Host, cfg.Port, "")
 	cfg.Fingerprint = ""
 	return a.store.Save(cfg)
 }

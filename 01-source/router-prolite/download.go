@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -285,15 +284,4 @@ func isHex(s string) bool {
 		}
 	}
 	return true
-}
-
-func sha256File(path string) string {
-	h := sha256.New()
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	_, _ = io.Copy(h, f)
-	return hex.EncodeToString(h.Sum(nil))
 }

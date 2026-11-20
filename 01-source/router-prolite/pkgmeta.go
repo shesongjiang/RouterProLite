@@ -515,13 +515,13 @@ func versionSatisfies(version, op, want string) bool {
 	switch op {
 	case "=", "==":
 		return c == 0
-	case ">":
+	case ">", ">>":
 		return c > 0
 	case ">=":
 		return c >= 0
-	case "<":
+	case "<", "<<":
 		return c < 0
-	case "<=", "<<":
+	case "<=":
 		return c <= 0
 	case "~", "~=":
 		return strings.HasPrefix(version, want)

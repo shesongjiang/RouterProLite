@@ -155,7 +155,8 @@ func (r *Router) verifyRemoteFile(ctx context.Context, local, remote string) err
 	out, err := r.execJob(ctx, "sha256sum "+shq(remote), 20*time.Second, nil)
 	if err == nil && out.ExitCode == 0 {
 		f := strings.Fields(out.Output)
-		if len(f) > 0 && strings.EqualFold(f[0], sha256File(local)) {
+		localSum, _ := fileSHA256(local)
+		if len(f) > 0 && strings.EqualFold(f[0], localSum) {
 			return nil
 		}
 		return fmt.Errorf("SHA256 不一致")
